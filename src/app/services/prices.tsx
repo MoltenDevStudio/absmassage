@@ -5,13 +5,13 @@ export default function Prices() {
       <br />
       45 min – $80
       <br />
-      60 min – $95
+      60 min – $100
       <br />
-      75 min – $115
+      75 min – $120
       <br />
-      90 min – $135
+      90 min – $140
       <br />
-      120 min – $175
+      120 min – $180
     </p>
   )
 }
