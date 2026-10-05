@@ -28,13 +28,14 @@ afterEach(() => {
 it('renders the requested choices and remembers rejection with a settings control', () => {
   const first = render(<CookieConsent>Page content</CookieConsent>)
   expect(screen.getByRole('heading', { name: 'Cookie choices' })).toBeTruthy()
-  expect(
-    screen.getByText(/We use optional cookies and similar technologies/),
-  ).toBeTruthy()
-  expect(document.querySelector('script')).toBeNull()
-  fireEvent.click(
-    screen.getByRole('button', { name: 'Reject optional cookies' }),
+  expect(document.querySelector('aside p')?.textContent).toBe(
+    'I use optional cookies and similar tech to understand how people use my website and to help with marketing. See my Privacy Policy for more information.',
   )
+  expect(
+    screen.getByRole('link', { name: 'Privacy Policy' }).getAttribute('href'),
+  ).toBe('/privacypolicy')
+  expect(document.querySelector('script')).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'Reject' }))
   expect(screen.queryByRole('heading', { name: 'Cookie choices' })).toBeNull()
   expect(
     screen.getByRole('button', { name: 'Change cookie settings' }),
@@ -45,8 +46,10 @@ it('renders the requested choices and remembers rejection with a settings contro
   fireEvent.click(
     screen.getByRole('button', { name: 'Change cookie settings' }),
   )
+  expect(screen.getByRole('button', { name: 'Accept' })).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: 'Close' }))
   expect(
-    screen.getByRole('button', { name: 'Accept optional cookies' }),
+    screen.getByRole('button', { name: 'Change cookie settings' }),
   ).toBeTruthy()
   expect(document.querySelector('script')).toBeNull()
 })
@@ -77,9 +80,7 @@ it('gates booking attribution and booking conversion events on the same choice',
     new MessageEvent('message', { data: 'cliniko-bookings-page:confirmed' }),
   )
   expect(window.dataLayer).toBeUndefined()
-  fireEvent.click(
-    screen.getByRole('button', { name: 'Accept optional cookies' }),
-  )
+  fireEvent.click(screen.getByRole('button', { name: 'Accept' }))
   expect(link.href).toContain('gclid=saved-ad-click')
   expect(document.querySelectorAll('script[src*="gtm.js"]')).toHaveLength(1)
   expect(document.querySelectorAll('script[src*="fbevents.js"]')).toHaveLength(
@@ -89,10 +90,27 @@ it('gates booking attribution and booking conversion events on the same choice',
     new MessageEvent('message', { data: 'cliniko-bookings-page:confirmed' }),
   )
   expect(
+    window.dataLayer!.some(
+      (event) =>
+        !('length' in event) && event.event === 'clinikoBookingCompleted',
+    ),
+  ).toBe(false)
+  document
+    .querySelector('script[src*="googletagmanager.com/gtm.js"]')!
+    .dispatchEvent(new Event('load'))
+  expect(
     window.dataLayer!.filter(
       (event) => 'event' in event && event.event === 'clinikoBookingCompleted',
     ),
   ).toHaveLength(1)
+  window.dispatchEvent(
+    new MessageEvent('message', { data: 'cliniko-bookings-page:confirmed' }),
+  )
+  expect(
+    window.dataLayer!.filter(
+      (event) => 'event' in event && event.event === 'clinikoBookingCompleted',
+    ),
+  ).toHaveLength(2)
   // Even before a synchronization message arrives, a rejected durable choice
   // blocks the conversion event and strips GCLID from a newly clicked link.
   document.cookie = `${CONSENT_COOKIE}=rejected; Path=/`
@@ -103,7 +121,7 @@ it('gates booking attribution and booking conversion events on the same choice',
     window.dataLayer!.filter(
       (event) => 'event' in event && event.event === 'clinikoBookingCompleted',
     ),
-  ).toHaveLength(1)
+  ).toHaveLength(2)
   fireEvent.click(link)
   expect(link.href).not.toContain('gclid')
 })

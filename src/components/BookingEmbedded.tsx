@@ -2,11 +2,10 @@
 import { useState, useEffect } from 'react'
 import '../styles/Booking.scss'
 import React from 'react'
-import { useOptionalTrackingConsent } from './CookieConsent'
-import { hasOptionalTrackingConsent } from '../lib/optionalTracking'
+import { useOptionalTracking } from './CookieConsent'
 
 function BookingEmbedded() {
-  const consent = useOptionalTrackingConsent()
+  const { trackBookingCompleted } = useOptionalTracking()
   const [height, setHeight] = useState('1000px')
 
   useEffect(() => {
@@ -16,14 +15,8 @@ function BookingEmbedded() {
         const newHeight = Number(e.data.split(':')[1])
         setHeight(`${newHeight}px`)
       }
-      if (
-        e.data.search('cliniko-bookings-page:confirmed') > -1 &&
-        consent === 'accepted' &&
-        hasOptionalTrackingConsent()
-      ) {
-        window.dataLayer?.push({
-          event: 'clinikoBookingCompleted',
-        })
+      if (e.data.search('cliniko-bookings-page:confirmed') > -1) {
+        trackBookingCompleted()
       }
       if (e.data.includes('cliniko-bookings-page')) {
         const clinikoBookings = document.getElementById('cliniko-94087596')
@@ -34,7 +27,7 @@ function BookingEmbedded() {
     return () => {
       window.removeEventListener('message', handleIFrameMessage)
     }
-  }, [consent])
+  }, [trackBookingCompleted])
 
   return (
     <div className="booking-container">

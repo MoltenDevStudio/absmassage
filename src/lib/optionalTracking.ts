@@ -67,6 +67,8 @@ export class OptionalTrackingController {
   private pathname = ''
   private channel: BroadcastChannel | null = null
   private googleStarted = false
+  private googleReady = false
+  private pendingBookingCompleted = false
   private metaScript: HTMLScriptElement | null = null
   private metaReady = false
   private metaInitialized = false
@@ -135,6 +137,15 @@ export class OptionalTrackingController {
     this.trackMetaPageView()
   }
 
+  trackBookingCompleted() {
+    if (!this.allowed()) return
+    if (!this.googleReady) {
+      this.pendingBookingCompleted = true
+      return
+    }
+    this.pushBookingCompleted()
+  }
+
   private onMessage = (event: MessageEvent) => {
     if (event.data === 'changed') this.synchronize()
   }
@@ -164,6 +175,8 @@ export class OptionalTrackingController {
       this.loadMeta()
       this.trackMetaPageView()
     } else {
+      this.pendingBookingCompleted = false
+      this.googleReady = false
       if (this.metaReady) this.browser.fbq?.('consent', 'revoke')
       this.metaGranted = false
       this.lastTrackedPathname = null
@@ -227,10 +240,20 @@ export class OptionalTrackingController {
           'gtm.start': Date.now(),
           event: 'gtm.js',
         })
+        this.googleReady = true
+        if (this.pendingBookingCompleted) {
+          this.pendingBookingCompleted = false
+          this.pushBookingCompleted()
+        }
       },
       { once: true },
     )
     this.browser.document.head.appendChild(script)
+  }
+
+  private pushBookingCompleted() {
+    if (!this.allowed()) return
+    this.browser.dataLayer!.push({ event: 'clinikoBookingCompleted' })
   }
 
   private loadMeta() {

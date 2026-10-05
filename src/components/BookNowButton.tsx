@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useOptionalTrackingConsent } from './CookieConsent'
+import { useOptionalTracking } from './CookieConsent'
 import { hasOptionalTrackingConsent } from '../lib/optionalTracking'
 
 const BOOKING_URL =
@@ -25,7 +25,7 @@ interface Props {
 }
 
 export default function BookNowButton({ className, text }: Props) {
-  const consent = useOptionalTrackingConsent()
+  const { consent } = useOptionalTracking()
   const [link, setLink] = useState(BOOKING_URL)
 
   useEffect(() => {

@@ -1,15 +1,30 @@
 'use client'
 
-import { createContext, useContext, useEffect, useRef, useState } from 'react'
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from 'react'
 import { usePathname } from 'next/navigation'
 import {
   OptionalTrackingController,
   type ConsentChoice,
 } from '../lib/optionalTracking'
 
-const OptionalTrackingContext = createContext<ConsentChoice>(null)
+type OptionalTrackingContextValue = {
+  consent: ConsentChoice
+  trackBookingCompleted: () => void
+}
 
-export function useOptionalTrackingConsent() {
+const OptionalTrackingContext = createContext<OptionalTrackingContextValue>({
+  consent: null,
+  trackBookingCompleted: () => {},
+})
+
+export function useOptionalTracking() {
   return useContext(OptionalTrackingContext)
 }
 
@@ -41,45 +56,54 @@ export default function CookieConsent({
     setSettingsOpen(false)
   }
 
+  const trackBookingCompleted = useCallback(
+    () => controller.current?.trackBookingCompleted(),
+    [],
+  )
+
   const showChoices = consent === null || settingsOpen
 
   return (
-    <OptionalTrackingContext.Provider value={consent}>
+    <OptionalTrackingContext.Provider
+      value={{
+        consent,
+        trackBookingCompleted,
+      }}
+    >
       {children}
       {consentLoaded &&
         (showChoices ? (
           <aside
             aria-labelledby="cookie-consent-heading"
-            className="fixed inset-x-0 bottom-0 z-[100] border-t border-gray-200 bg-white px-4 py-5 text-left text-gray-900 shadow-2xl sm:px-6"
+            className="fixed inset-x-0 bottom-0 z-[100] border-t border-gray-200 bg-white px-4 py-3 text-left text-gray-900 shadow-2xl sm:px-6"
             role="region"
           >
             <div className="mx-auto max-w-6xl">
               <h2 id="cookie-consent-heading" className="m-0 text-lg font-bold">
                 Cookie choices
               </h2>
-              <p className="my-2 max-w-3xl text-sm leading-relaxed">
-                We use optional cookies and similar technologies to understand
-                how people use our website and to help measure our marketing.
-                You can accept or reject these. See our{' '}
+              <p className="my-1 max-w-3xl text-sm leading-relaxed">
+                I use optional cookies and similar tech to understand how people
+                use my website and to help with marketing. See my{' '}
                 <a className="underline" href="/privacypolicy">
                   Privacy Policy
                 </a>{' '}
                 for more information.
               </p>
-              <div className="mt-4 flex flex-wrap gap-3">
+              <div className="mt-2 flex flex-wrap gap-2">
                 <button
-                  className="rounded border border-gray-400 px-4 py-2 text-sm font-semibold hover:bg-gray-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+                  className="min-h-11 rounded border border-gray-400 px-4 py-2 text-sm font-semibold hover:bg-gray-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
                   onClick={() => chooseConsent('rejected')}
                   type="button"
                 >
-                  Reject optional cookies
+                  Reject
                 </button>
                 <button
-                  className="rounded bg-[#1f4c3c] px-4 py-2 text-sm font-semibold text-white hover:bg-[#17392d] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+                  className="min-h-11 rounded bg-[#1f4c3c] px-4 py-2 text-sm font-semibold text-white hover:bg-[#17392d] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
                   onClick={() => chooseConsent('accepted')}
                   type="button"
                 >
-                  Accept optional cookies
+                  Accept
                 </button>
                 {consent !== null && (
                   <button

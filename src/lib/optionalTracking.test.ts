@@ -72,6 +72,13 @@ function googleCalls(fixture: ReturnType<typeof tab>) {
   })
 }
 
+function bookingEvents(fixture: ReturnType<typeof tab>) {
+  return (fixture.browser.dataLayer || []).filter(
+    (entry) =>
+      !('length' in entry) && entry.event === 'clinikoBookingCompleted',
+  )
+}
+
 afterEach(() => {
   for (const fixture of fixtures.splice(0)) {
     fixture.controller.stop()
@@ -199,6 +206,42 @@ describe('optional tracking consent', () => {
         (entry) => !('length' in entry) && entry.event === 'gtm.js',
       ),
     ).toHaveLength(1)
+  })
+
+  it('discards a pending booking conversion when another tab withdraws consent', () => {
+    const jar = new CookieJar()
+    const first = tab(jar)
+    const second = tab(jar)
+    first.controller.start()
+    second.controller.start()
+    first.controller.choose('accepted')
+    const secondGtm = second.browser.document.querySelector(
+      'script[src*="googletagmanager.com/gtm.js"]',
+    )!
+
+    second.controller.trackBookingCompleted()
+    expect(bookingEvents(second)).toHaveLength(0)
+
+    first.controller.choose('rejected')
+    secondGtm.dispatchEvent(new second.dom.window.Event('load'))
+
+    expect(bookingEvents(second)).toHaveLength(0)
+    expect(
+      second.browser.dataLayer!.some(
+        (entry) => !('length' in entry) && entry.event === 'gtm.js',
+      ),
+    ).toBe(false)
+    expect(googleCalls(second).at(-1)).toEqual([
+      'consent',
+      'update',
+      {
+        analytics_storage: 'denied',
+        ad_storage: 'denied',
+        ad_user_data: 'denied',
+        ad_personalization: 'denied',
+      },
+    ])
+    expect(second.reload).toHaveBeenCalledOnce()
   })
 
   it('loads GTM and Meta only after acceptance, then tracks each pathname once', () => {
