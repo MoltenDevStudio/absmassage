@@ -3,12 +3,10 @@ import '../styles/NavBar.scss'
 // import NavBarSSR from '../components/Nav/NavBar'
 import dynamic from 'next/dynamic'
 import type { Metadata } from 'next'
-import { GoogleTagManager } from '@next/third-parties/google'
 import { Analytics } from '@vercel/analytics/react'
 import { SpeedInsights } from '@vercel/speed-insights/next'
 import { Raleway } from 'next/font/google'
-import GclidTracker from '../components/GclidTracker.tsx'
-import MetaPixelConsent from '../components/MetaPixelConsent.tsx'
+import CookieConsent from '../components/CookieConsent.tsx'
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://andrewboltonsportsmassage.com'),
@@ -108,23 +106,21 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className={raleway.className}>
-      <GoogleTagManager gtmId="GTM-PSTX555" />
-
       <body>
-        <MetaPixelConsent />
-        <script
-          type="application/ld+json"
-          dangerouslySetInnerHTML={{
-            __html: JSON.stringify(localBusinessJsonLd),
-          }}
-        />
-        <GclidTracker />
-        <NavBarSSR />
+        <CookieConsent>
+          <script
+            type="application/ld+json"
+            dangerouslySetInnerHTML={{
+              __html: JSON.stringify(localBusinessJsonLd),
+            }}
+          />
+          <NavBarSSR />
 
-        <div id="root">{children}</div>
-        <Analytics />
-        <SpeedInsights />
-        <Footer />
+          <div id="root">{children}</div>
+          <Analytics />
+          <SpeedInsights />
+          <Footer />
+        </CookieConsent>
       </body>
     </html>
   )
