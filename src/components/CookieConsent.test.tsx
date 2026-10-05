@@ -31,7 +31,7 @@ it('renders the requested choices and remembers rejection with a settings contro
     screen.getByRole('heading', { name: 'Cookie choices' }).className,
   ).toContain('sr-only')
   expect(document.querySelector('aside p')?.textContent).toBe(
-    'I use optional cookies and similar tech to understand website use and help with marketing. See my Privacy Policy.',
+    'I use cookies & similar tech to understand site use & help with marketing. See my Privacy Policy.',
   )
   expect(
     screen.getByRole('link', { name: 'Privacy Policy' }).getAttribute('href'),
