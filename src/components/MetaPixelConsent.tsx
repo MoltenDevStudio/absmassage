@@ -104,36 +104,42 @@ export default function MetaPixelConsent() {
   }, [])
 
   useEffect(() => {
-    if (!consentLoaded || appliedConsent.current === consent) return
+    if (!consentLoaded) return
 
-    appliedConsent.current = consent
+    if (appliedConsent.current !== consent) {
+      appliedConsent.current = consent
 
-    if (consent === 'rejected') {
-      if (pixelConsentGranted.current) {
-        queueMetaPixel('consent', 'revoke')
-        pixelConsentGranted.current = false
+      if (consent === 'rejected') {
+        if (pixelConsentGranted.current) {
+          queueMetaPixel('consent', 'revoke')
+          pixelConsentGranted.current = false
+        }
+        lastTrackedPathname.current = null
+        clearMetaCookies()
+        return
       }
-      lastTrackedPathname.current = null
-      clearMetaCookies()
-      return
+
+      if (consent === 'accepted') {
+        if (!pixelConsentGranted.current) {
+          ensureMetaPixel(() => {
+            if (!pixelConsentGranted.current) clearMetaCookies()
+          })
+          queueMetaPixel('consent', 'grant')
+          pixelConsentGranted.current = true
+        }
+
+        if (!pixelInitialized.current) {
+          queueMetaPixel('init', PIXEL_ID)
+          pixelInitialized.current = true
+        }
+      }
     }
 
-    if (consent !== 'accepted') return
-
-    if (!pixelConsentGranted.current) {
-      ensureMetaPixel(() => {
-        if (!pixelConsentGranted.current) clearMetaCookies()
-      })
-      queueMetaPixel('consent', 'grant')
-      pixelConsentGranted.current = true
-    }
-
-    if (!pixelInitialized.current) {
-      queueMetaPixel('init', PIXEL_ID)
-      pixelInitialized.current = true
-    }
-
-    if (lastTrackedPathname.current !== pathname) {
+    if (
+      consent === 'accepted' &&
+      pixelInitialized.current &&
+      lastTrackedPathname.current !== pathname
+    ) {
       queueMetaPixel('track', 'PageView')
       lastTrackedPathname.current = pathname
     }
