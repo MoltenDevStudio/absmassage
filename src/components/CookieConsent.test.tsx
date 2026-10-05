@@ -27,9 +27,11 @@ afterEach(() => {
 
 it('renders the requested choices and remembers rejection with a settings control', () => {
   const first = render(<CookieConsent>Page content</CookieConsent>)
-  expect(screen.getByRole('heading', { name: 'Cookie choices' })).toBeTruthy()
+  expect(
+    screen.getByRole('heading', { name: 'Cookie choices' }).className,
+  ).toContain('sr-only')
   expect(document.querySelector('aside p')?.textContent).toBe(
-    'I use optional cookies and similar tech to understand how people use my website and to help with marketing. See my Privacy Policy for more information.',
+    'I use optional cookies and similar tech to understand website use and help with marketing. See my Privacy Policy.',
   )
   expect(
     screen.getByRole('link', { name: 'Privacy Policy' }).getAttribute('href'),
@@ -41,25 +43,33 @@ it('renders the requested choices and remembers rejection with a settings contro
   expect(rejectButton.parentElement?.parentElement?.className).toContain(
     'justify-center',
   )
-  expect(rejectButton.className).toContain('min-h-11')
-  expect(acceptButton.className).toContain('min-h-11')
+  expect(rejectButton.className).toContain('min-h-10')
+  expect(rejectButton.className).toContain('py-1.5')
+  expect(rejectButton.className).toContain('rounded-lg')
+  expect(acceptButton.className).toContain('min-h-10')
+  expect(acceptButton.className).toContain('py-1.5')
+  expect(acceptButton.className).toContain('rounded-lg')
   expect(document.querySelector('script')).toBeNull()
   fireEvent.click(screen.getByRole('button', { name: 'Reject' }))
-  expect(screen.queryByRole('heading', { name: 'Cookie choices' })).toBeNull()
+  expect(screen.queryByRole('region', { name: 'Cookie choices' })).toBeNull()
   expect(
     screen.getByRole('button', { name: 'Change cookie settings' }),
   ).toBeTruthy()
   first.unmount()
   render(<CookieConsent>Page content</CookieConsent>)
-  expect(screen.queryByRole('heading', { name: 'Cookie choices' })).toBeNull()
+  expect(screen.queryByRole('region', { name: 'Cookie choices' })).toBeNull()
   fireEvent.click(
     screen.getByRole('button', { name: 'Change cookie settings' }),
   )
   expect(screen.getByRole('button', { name: 'Accept' })).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'Close' }).className).toContain(
+    'right-0',
+  )
   fireEvent.click(screen.getByRole('button', { name: 'Close' }))
   expect(
     screen.getByRole('button', { name: 'Change cookie settings' }),
   ).toBeTruthy()
+  expect(screen.queryByRole('region', { name: 'Cookie choices' })).toBeNull()
   expect(document.querySelector('script')).toBeNull()
 })
 

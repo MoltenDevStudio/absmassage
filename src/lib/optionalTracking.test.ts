@@ -280,20 +280,13 @@ describe('optional tracking consent', () => {
     )
   })
 
-  it('tracks accepted pathnames in order when navigation occurs while Meta loads', () => {
+  it('tracks only the current pathname after accepted navigation during Meta loading', () => {
     const fixture = tab()
     fixture.controller.start()
     fixture.controller.choose('accepted')
     fixture.controller.navigate('/about')
     fixture.controller.navigate('/about')
     fixture.controller.navigate('/contact')
-    expect(
-      (
-        fixture.controller as unknown as {
-          pendingMetaPathnames: string[]
-        }
-      ).pendingMetaPathnames,
-    ).toEqual(['/', '/about', '/contact'])
     expect(fixture.browser.fbq!.queue).toHaveLength(0)
 
     const pixel = finishMeta(fixture)
@@ -301,12 +294,15 @@ describe('optional tracking consent', () => {
       ['consent', 'grant'],
       ['init', '2126552771609777'],
       ['track', 'PageView'],
-      ['track', 'PageView'],
-      ['track', 'PageView'],
     ])
     fixture.controller.navigate('/contact')
     expect(pixel.mock.calls.filter((call) => call[0] === 'track')).toHaveLength(
-      3,
+      1,
+    )
+    fixture.controller.navigate('/about')
+    fixture.controller.navigate('/about')
+    expect(pixel.mock.calls.filter((call) => call[0] === 'track')).toHaveLength(
+      2,
     )
     expect(pixel.mock.calls.filter((call) => call[0] === 'init')).toHaveLength(
       1,
@@ -366,22 +362,8 @@ describe('optional tracking consent', () => {
     fixture.controller.navigate('/about')
     fixture.controller.navigate('/contact')
     expect(fixture.browser.fbq!.queue).toHaveLength(0)
-    expect(
-      (
-        fixture.controller as unknown as {
-          pendingMetaPathnames: string[]
-        }
-      ).pendingMetaPathnames,
-    ).toEqual(['/', '/about', '/contact'])
     fixture.controller.choose('rejected')
     expect(fixture.browser.fbq!.queue).toHaveLength(0)
-    expect(
-      (
-        fixture.controller as unknown as {
-          pendingMetaPathnames: string[]
-        }
-      ).pendingMetaPathnames,
-    ).toEqual([])
     const pixel = finishMeta(fixture)
     fixture.controller.navigate('/about')
     expect(pixel.mock.calls).toEqual([['consent', 'revoke']])

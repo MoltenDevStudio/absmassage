@@ -75,32 +75,32 @@ export default function CookieConsent({
         (showChoices ? (
           <aside
             aria-labelledby="cookie-consent-heading"
-            className="fixed inset-x-0 bottom-0 z-[100] border-t border-gray-200 bg-white px-4 py-3 text-left text-gray-900 shadow-2xl sm:px-6"
+            className="fixed inset-x-0 bottom-0 z-[100] border-t border-gray-200 bg-white px-4 py-2 text-left text-gray-900 shadow-2xl sm:px-6"
             role="region"
           >
             <div className="mx-auto max-w-6xl">
-              <h2 id="cookie-consent-heading" className="m-0 text-lg font-bold">
+              <h2 id="cookie-consent-heading" className="sr-only">
                 Cookie choices
               </h2>
-              <p className="my-1 max-w-3xl text-sm leading-relaxed">
-                I use optional cookies and similar tech to understand how people
-                use my website and to help with marketing. See my{' '}
+              <p className="my-0 max-w-3xl text-sm leading-relaxed">
+                I use optional cookies and similar tech to understand website
+                use and help with marketing. See my{' '}
                 <a className="underline" href="/privacypolicy">
                   Privacy Policy
-                </a>{' '}
-                for more information.
+                </a>
+                .
               </p>
-              <div className="relative mt-2 flex min-h-11 justify-center">
+              <div className="relative mt-1 flex min-h-10 justify-center">
                 <div className="flex gap-2">
                   <button
-                    className="min-h-11 rounded border border-gray-400 px-4 py-2 text-sm font-semibold hover:bg-gray-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+                    className="min-h-10 rounded-lg border border-gray-400 px-4 py-1.5 text-sm font-semibold hover:bg-gray-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
                     onClick={() => chooseConsent('rejected')}
                     type="button"
                   >
                     Reject
                   </button>
                   <button
-                    className="min-h-11 rounded bg-[#1f4c3c] px-4 py-2 text-sm font-semibold text-white hover:bg-[#17392d] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+                    className="min-h-10 rounded-lg bg-[#1f4c3c] px-4 py-1.5 text-sm font-semibold text-white hover:bg-[#17392d] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
                     onClick={() => chooseConsent('accepted')}
                     type="button"
                   >
