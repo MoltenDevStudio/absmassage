@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation'
 
 const CONSENT_COOKIE = 'meta_pixel_consent'
 const PIXEL_ID = '2126552771609777'
+const SITE_DOMAIN = 'andrewboltonsportsmassage.com'
 
 type ConsentChoice = 'accepted' | 'rejected' | null
 
@@ -43,14 +44,30 @@ function writeConsent(choice: Exclude<ConsentChoice, null>) {
   document.cookie = `${CONSENT_COOKIE}=${choice}; Max-Age=31536000; Path=/; SameSite=Lax${secure}`
 }
 
-function queueMetaPixel(...args: MetaPixelCommand) {
-  if (window.fbq) {
-    window.fbq(...args)
-    return
+function clearMetaCookies() {
+  const hostname = window.location.hostname.toLowerCase()
+  const cookieDomains = new Set([hostname])
+
+  if (hostname === SITE_DOMAIN || hostname.endsWith(`.${SITE_DOMAIN}`)) {
+    cookieDomains.add(SITE_DOMAIN)
   }
 
-  const pixel = function (...queuedArgs: MetaPixelCommand) {
-    if (pixel.callMethod) pixel.callMethod(...queuedArgs)
+  const secure = window.location.protocol === 'https:' ? '; Secure' : ''
+  const expiry = `=; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/; SameSite=Lax${secure}`
+
+  for (const name of ['_fbp', '_fbc']) {
+    for (const domain of cookieDomains) {
+      document.cookie = `${name}${expiry}`
+      document.cookie = `${name}${expiry}; Domain=${domain}`
+    }
+  }
+}
+
+function ensureMetaPixel(onLoad: () => void) {
+  if (window.fbq) return
+
+  const pixel = function (...args: MetaPixelCommand) {
+    if (pixel.callMethod) pixel.callMethod(...args)
     else pixel.queue.push(arguments)
   } as MetaPixelFunction
 
@@ -59,12 +76,16 @@ function queueMetaPixel(...args: MetaPixelCommand) {
   pixel.loaded = true
   pixel.version = '2.0'
   window.fbq = window._fbq = pixel
-  pixel(...args)
 
   const script = document.createElement('script')
   script.async = true
   script.src = 'https://connect.facebook.net/en_US/fbevents.js'
+  script.addEventListener('load', onLoad, { once: true })
   document.head.appendChild(script)
+}
+
+function queueMetaPixel(...args: MetaPixelCommand) {
+  window.fbq?.(...args)
 }
 
 export default function MetaPixelConsent() {
@@ -72,6 +93,7 @@ export default function MetaPixelConsent() {
   const [consent, setConsent] = useState<ConsentChoice>(null)
   const [consentLoaded, setConsentLoaded] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const appliedConsent = useRef<ConsentChoice>(null)
   const pixelInitialized = useRef(false)
   const pixelConsentGranted = useRef(false)
   const lastTrackedPathname = useRef<string | null>(null)
@@ -82,18 +104,26 @@ export default function MetaPixelConsent() {
   }, [])
 
   useEffect(() => {
+    if (!consentLoaded || appliedConsent.current === consent) return
+
+    appliedConsent.current = consent
+
     if (consent === 'rejected') {
       if (pixelConsentGranted.current) {
         queueMetaPixel('consent', 'revoke')
         pixelConsentGranted.current = false
       }
       lastTrackedPathname.current = null
+      clearMetaCookies()
       return
     }
 
     if (consent !== 'accepted') return
 
     if (!pixelConsentGranted.current) {
+      ensureMetaPixel(() => {
+        if (!pixelConsentGranted.current) clearMetaCookies()
+      })
       queueMetaPixel('consent', 'grant')
       pixelConsentGranted.current = true
     }
@@ -107,7 +137,7 @@ export default function MetaPixelConsent() {
       queueMetaPixel('track', 'PageView')
       lastTrackedPathname.current = pathname
     }
-  }, [consent, pathname])
+  }, [consent, consentLoaded, pathname])
 
   function chooseConsent(choice: Exclude<ConsentChoice, null>) {
     writeConsent(choice)
