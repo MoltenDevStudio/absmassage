@@ -98,10 +98,34 @@ function privacypolicy() {
           </li>
           <li className=" mt-2">
             Cookie and tracking technology data, which would include pages
-            visited, time spent on pages, language preferences, and other
-            anonymous traffic data.
+            visited, time spent on pages, language preferences, and traffic
+            data. Advertising tools may associate this data with your device or
+            account; see the Meta Pixel section below for details.
           </li>
         </ul>
+        <h2 className="p-heading mt-2">
+          Meta Pixel and advertising measurement
+        </h2>
+        <p>
+          If you accept advertising cookies in Cookie settings, we use the Meta
+          Pixel, provided by Meta Platforms Ireland Limited and its affiliates,
+          to measure visits and advertising effectiveness. The pixel may share
+          your IP address, browser and device information, pages viewed, and
+          information about interactions with our ads with Meta. Meta may
+          associate this information with your account and process it under its
+          own privacy policies, including for advertising. The pixel does not
+          load unless you accept. You can reject or withdraw consent at any time
+          using Cookie settings at the bottom left of the page. For more
+          information, see{' '}
+          <a
+            href="https://www.facebook.com/privacy/policy/"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Meta’s Privacy Policy
+          </a>
+          .
+        </p>
         <h2 className="p-heading mt-2">How this information is used</h2>
         <p>
           In general, personal information we collect is used by us to inform
