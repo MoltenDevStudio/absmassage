@@ -208,11 +208,28 @@ export class OptionalTrackingController {
   private loadGoogle() {
     if (this.googleStarted || !this.allowed()) return
     this.googleStarted = true
-    this.googleConsent('default', 'granted')
-    this.browser.dataLayer!.push({ 'gtm.start': Date.now(), event: 'gtm.js' })
+    // Keep GTM denied while its code is downloading. If consent is withdrawn
+    // before load, it must not process its initial event under a stale grant.
+    this.googleConsent('default', 'denied')
     const script = this.browser.document.createElement('script')
     script.async = true
     script.src = `https://www.googletagmanager.com/gtm.js?id=${GTM_ID}`
+    script.addEventListener(
+      'load',
+      () => {
+        this.synchronize()
+        if (!this.allowed()) {
+          this.googleConsent('update', 'denied')
+          return
+        }
+        this.googleConsent('update', 'granted')
+        this.browser.dataLayer!.push({
+          'gtm.start': Date.now(),
+          event: 'gtm.js',
+        })
+      },
+      { once: true },
+    )
     this.browser.document.head.appendChild(script)
   }
 

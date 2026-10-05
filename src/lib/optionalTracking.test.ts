@@ -64,6 +64,14 @@ function finishMeta(fixture: ReturnType<typeof tab>) {
   return pixel
 }
 
+function googleCalls(fixture: ReturnType<typeof tab>) {
+  return (fixture.browser.dataLayer || []).flatMap((entry) => {
+    if (Array.isArray(entry)) return [entry]
+    if ('length' in entry) return [Array.from(entry as IArguments)]
+    return []
+  })
+}
+
 afterEach(() => {
   for (const fixture of fixtures.splice(0)) {
     fixture.controller.stop()
@@ -98,6 +106,99 @@ describe('optional tracking consent', () => {
     expect(scripts(first)).toEqual([])
     expect(scripts(next)).toEqual([])
     expect(next.browser.document.cookie).toContain(`${CONSENT_COOKIE}=rejected`)
+  })
+
+  it('keeps GTM denied if consent is withdrawn while its script is loading', () => {
+    const fixture = tab()
+    fixture.controller.start()
+    fixture.controller.choose('accepted')
+    const gtm = fixture.browser.document.querySelector(
+      'script[src*="googletagmanager.com/gtm.js"]',
+    )!
+    expect(googleCalls(fixture)).toEqual([
+      [
+        'consent',
+        'default',
+        {
+          analytics_storage: 'denied',
+          ad_storage: 'denied',
+          ad_user_data: 'denied',
+          ad_personalization: 'denied',
+        },
+      ],
+    ])
+    expect(
+      fixture.browser.dataLayer!.some(
+        (entry) => !('length' in entry) && entry.event === 'gtm.js',
+      ),
+    ).toBe(false)
+
+    fixture.controller.choose('rejected')
+    gtm.dispatchEvent(new fixture.dom.window.Event('load'))
+
+    expect(
+      googleCalls(fixture).some(
+        (call) =>
+          call[0] === 'consent' && call[2]?.analytics_storage === 'granted',
+      ),
+    ).toBe(false)
+    expect(
+      fixture.browser.dataLayer!.some(
+        (entry) => !('length' in entry) && entry.event === 'gtm.js',
+      ),
+    ).toBe(false)
+    expect(googleCalls(fixture).at(-1)).toEqual([
+      'consent',
+      'update',
+      {
+        analytics_storage: 'denied',
+        ad_storage: 'denied',
+        ad_user_data: 'denied',
+        ad_personalization: 'denied',
+      },
+    ])
+    expect(fixture.reload).toHaveBeenCalledOnce()
+  })
+
+  it('grants Google consent and queues the initial GTM event once after load', () => {
+    const fixture = tab()
+    fixture.controller.start()
+    fixture.controller.choose('accepted')
+    const gtm = fixture.browser.document.querySelector(
+      'script[src*="googletagmanager.com/gtm.js"]',
+    )!
+
+    expect(googleCalls(fixture)).toHaveLength(1)
+    gtm.dispatchEvent(new fixture.dom.window.Event('load'))
+    gtm.dispatchEvent(new fixture.dom.window.Event('load'))
+
+    expect(googleCalls(fixture)).toEqual([
+      [
+        'consent',
+        'default',
+        {
+          analytics_storage: 'denied',
+          ad_storage: 'denied',
+          ad_user_data: 'denied',
+          ad_personalization: 'denied',
+        },
+      ],
+      [
+        'consent',
+        'update',
+        {
+          analytics_storage: 'granted',
+          ad_storage: 'granted',
+          ad_user_data: 'granted',
+          ad_personalization: 'granted',
+        },
+      ],
+    ])
+    expect(
+      fixture.browser.dataLayer!.filter(
+        (entry) => !('length' in entry) && entry.event === 'gtm.js',
+      ),
+    ).toHaveLength(1)
   })
 
   it('loads GTM and Meta only after acceptance, then tracks each pathname once', () => {
