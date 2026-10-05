@@ -83,8 +83,8 @@ export default function CookieConsent({
                 Cookie choices
               </h2>
               <p className="my-0 max-w-3xl text-sm leading-relaxed">
-                I use optional cookies and similar tech to understand website
-                use and help with marketing. See my{' '}
+                I use cookies &amp; similar tech to understand site use &amp;
+                help with marketing. See my{' '}
                 <a className="underline" href="/privacypolicy">
                   Privacy Policy
                 </a>
