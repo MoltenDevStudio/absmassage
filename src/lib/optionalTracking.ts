@@ -74,6 +74,7 @@ export class OptionalTrackingController {
   private metaInitialized = false
   private metaGranted = false
   private lastTrackedPathname: string | null = null
+  private pendingMetaPathnames: string[] = []
 
   constructor(
     private browser: Window & typeof globalThis,
@@ -177,6 +178,7 @@ export class OptionalTrackingController {
     } else {
       this.pendingBookingCompleted = false
       this.googleReady = false
+      this.pendingMetaPathnames = []
       if (this.metaReady) this.browser.fbq?.('consent', 'revoke')
       this.metaGranted = false
       this.lastTrackedPathname = null
@@ -291,7 +293,15 @@ export class OptionalTrackingController {
   }
 
   private trackMetaPageView() {
-    if (!this.metaReady || !this.allowed()) return
+    if (!this.allowed()) return
+    if (!this.metaReady) {
+      const lastPendingPathname =
+        this.pendingMetaPathnames.at(-1) ?? this.lastTrackedPathname
+      if (lastPendingPathname !== this.pathname) {
+        this.pendingMetaPathnames.push(this.pathname)
+      }
+      return
+    }
     if (!this.metaGranted) {
       this.browser.fbq?.('consent', 'grant')
       this.metaGranted = true
@@ -300,9 +310,14 @@ export class OptionalTrackingController {
       this.browser.fbq?.('init', PIXEL_ID)
       this.metaInitialized = true
     }
-    if (this.lastTrackedPathname !== this.pathname) {
+    const pendingPathnames = this.pendingMetaPathnames.splice(0)
+    const pathnames = pendingPathnames.length
+      ? pendingPathnames
+      : [this.pathname]
+    for (const pathname of pathnames) {
+      if (this.lastTrackedPathname === pathname) continue
       this.browser.fbq?.('track', 'PageView')
-      this.lastTrackedPathname = this.pathname
+      this.lastTrackedPathname = pathname
     }
   }
 

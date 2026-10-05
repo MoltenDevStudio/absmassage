@@ -34,6 +34,15 @@ it('renders the requested choices and remembers rejection with a settings contro
   expect(
     screen.getByRole('link', { name: 'Privacy Policy' }).getAttribute('href'),
   ).toBe('/privacypolicy')
+  const rejectButton = screen.getByRole('button', { name: 'Reject' })
+  const acceptButton = screen.getByRole('button', { name: 'Accept' })
+  expect(rejectButton.parentElement).toBe(acceptButton.parentElement)
+  expect(rejectButton.parentElement?.className).toContain('flex gap-2')
+  expect(rejectButton.parentElement?.parentElement?.className).toContain(
+    'justify-center',
+  )
+  expect(rejectButton.className).toContain('min-h-11')
+  expect(acceptButton.className).toContain('min-h-11')
   expect(document.querySelector('script')).toBeNull()
   fireEvent.click(screen.getByRole('button', { name: 'Reject' }))
   expect(screen.queryByRole('heading', { name: 'Cookie choices' })).toBeNull()

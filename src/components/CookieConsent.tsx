@@ -90,24 +90,26 @@ export default function CookieConsent({
                 </a>{' '}
                 for more information.
               </p>
-              <div className="mt-2 flex flex-wrap gap-2">
-                <button
-                  className="min-h-11 rounded border border-gray-400 px-4 py-2 text-sm font-semibold hover:bg-gray-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
-                  onClick={() => chooseConsent('rejected')}
-                  type="button"
-                >
-                  Reject
-                </button>
-                <button
-                  className="min-h-11 rounded bg-[#1f4c3c] px-4 py-2 text-sm font-semibold text-white hover:bg-[#17392d] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
-                  onClick={() => chooseConsent('accepted')}
-                  type="button"
-                >
-                  Accept
-                </button>
+              <div className="relative mt-2 flex min-h-11 justify-center">
+                <div className="flex gap-2">
+                  <button
+                    className="min-h-11 rounded border border-gray-400 px-4 py-2 text-sm font-semibold hover:bg-gray-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+                    onClick={() => chooseConsent('rejected')}
+                    type="button"
+                  >
+                    Reject
+                  </button>
+                  <button
+                    className="min-h-11 rounded bg-[#1f4c3c] px-4 py-2 text-sm font-semibold text-white hover:bg-[#17392d] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+                    onClick={() => chooseConsent('accepted')}
+                    type="button"
+                  >
+                    Accept
+                  </button>
+                </div>
                 {consent !== null && (
                   <button
-                    className="rounded px-3 py-2 text-sm underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+                    className="absolute right-0 top-1/2 -translate-y-1/2 rounded px-3 py-2 text-sm underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
                     onClick={() => setSettingsOpen(false)}
                     type="button"
                   >

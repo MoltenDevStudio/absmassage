@@ -280,15 +280,35 @@ describe('optional tracking consent', () => {
     )
   })
 
-  it('tracks the latest accepted page when navigation occurs while Meta loads', () => {
+  it('tracks accepted pathnames in order when navigation occurs while Meta loads', () => {
     const fixture = tab()
     fixture.controller.start()
     fixture.controller.choose('accepted')
+    fixture.controller.navigate('/about')
+    fixture.controller.navigate('/about')
     fixture.controller.navigate('/contact')
+    expect(
+      (
+        fixture.controller as unknown as {
+          pendingMetaPathnames: string[]
+        }
+      ).pendingMetaPathnames,
+    ).toEqual(['/', '/about', '/contact'])
     expect(fixture.browser.fbq!.queue).toHaveLength(0)
+
     const pixel = finishMeta(fixture)
+    expect(pixel.mock.calls).toEqual([
+      ['consent', 'grant'],
+      ['init', '2126552771609777'],
+      ['track', 'PageView'],
+      ['track', 'PageView'],
+      ['track', 'PageView'],
+    ])
     fixture.controller.navigate('/contact')
     expect(pixel.mock.calls.filter((call) => call[0] === 'track')).toHaveLength(
+      3,
+    )
+    expect(pixel.mock.calls.filter((call) => call[0] === 'init')).toHaveLength(
       1,
     )
   })
@@ -343,9 +363,25 @@ describe('optional tracking consent', () => {
     const fixture = tab()
     fixture.controller.start()
     fixture.controller.choose('accepted')
+    fixture.controller.navigate('/about')
+    fixture.controller.navigate('/contact')
     expect(fixture.browser.fbq!.queue).toHaveLength(0)
+    expect(
+      (
+        fixture.controller as unknown as {
+          pendingMetaPathnames: string[]
+        }
+      ).pendingMetaPathnames,
+    ).toEqual(['/', '/about', '/contact'])
     fixture.controller.choose('rejected')
     expect(fixture.browser.fbq!.queue).toHaveLength(0)
+    expect(
+      (
+        fixture.controller as unknown as {
+          pendingMetaPathnames: string[]
+        }
+      ).pendingMetaPathnames,
+    ).toEqual([])
     const pixel = finishMeta(fixture)
     fixture.controller.navigate('/about')
     expect(pixel.mock.calls).toEqual([['consent', 'revoke']])
@@ -393,6 +429,8 @@ describe('optional tracking consent', () => {
     first.controller.start()
     second.controller.start()
     first.controller.choose('accepted')
+    second.controller.navigate('/about')
+    second.controller.navigate('/contact')
     first.controller.choose('rejected')
     const pixel = finishMeta(second)
     expect(second.changed).toHaveBeenLastCalledWith('rejected')
