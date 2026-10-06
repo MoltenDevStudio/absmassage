@@ -98,10 +98,61 @@ function privacypolicy() {
           </li>
           <li className=" mt-2">
             Cookie and tracking technology data, which would include pages
-            visited, time spent on pages, language preferences, and other
-            anonymous traffic data.
+            visited, time spent on pages, language preferences, and traffic
+            data. Advertising tools may associate this data with your device or
+            account; see the optional tracking section below for details.
           </li>
         </ul>
+        <h2 className="p-heading mt-2">
+          Optional analytics and advertising tracking
+        </h2>
+        <p>
+          When you accept optional tracking, we may use Google analytics and
+          advertising technologies loaded through Google Tag Manager, and the
+          Meta Pixel. These help us understand website use and measure our
+          marketing. Google Tag Manager is the tool that loads tracking tags. It
+          and the Meta Pixel are disabled unless you accept.
+        </p>
+        <p>
+          Google and Meta may receive information about visits, pages viewed,
+          device and browser details, IP addresses, and interactions with the
+          website or our ads. They may associate measurement information with
+          your device or account and process it under their own privacy
+          policies. See{' '}
+          <a
+            href="https://policies.google.com/technologies/ads"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Google’s advertising privacy information
+          </a>{' '}
+          and{' '}
+          <a
+            href="https://www.facebook.com/privacy/policy/"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Meta’s Privacy Policy
+          </a>
+          .
+        </p>
+        <p>
+          You can reject optional tracking or withdraw consent later using
+          Cookie settings at the bottom left of the page. Withdrawal clears
+          supported advertising and measurement cookies and may refresh the page
+          to stop tracking tags that have already loaded. A first-party
+          functional cookie remembers your choice for up to a year, including
+          when you reject optional tracking. Other open tabs on this website
+          receive updates to your choice.
+        </p>
+        <p>
+          With consent, we also retain Google ad click identifiers for booking
+          attribution and may include them in links to our Cliniko booking
+          service. They are cleared when you withdraw consent. Separately,
+          Vercel Web Analytics and Speed Insights provide cookieless website
+          statistics and performance measurements; they are not used for
+          advertising profiles and remain outside this optional tracking choice.
+        </p>
         <h2 className="p-heading mt-2">How this information is used</h2>
         <p>
           In general, personal information we collect is used by us to inform
