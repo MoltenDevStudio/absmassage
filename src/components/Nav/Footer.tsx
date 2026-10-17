@@ -4,9 +4,11 @@ import absmlogo from '../../../images/logos/andrew-bolton-sports-massage-logo.we
 import { FaEnvelope, FaPhone, FaLocationDot } from 'react-icons/fa6'
 import React, { useEffect, useState } from 'react'
 import BookNowButton from '../BookNowButton'
+import { useOptionalTracking } from '../CookieConsent'
 
 function Footer() {
   const [isSmallScreen, setIsSmallScreen] = useState(false)
+  const { openCookieSettings } = useOptionalTracking()
 
   useEffect(() => {
     const handleResize = () => {
@@ -81,6 +83,13 @@ function Footer() {
           >
             Privacy Policy
           </Link>
+          <button
+            type="button"
+            className="footer-link hover-link inline-block text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+            onClick={openCookieSettings}
+          >
+            Cookie settings
+          </button>
           <BookNowButton className="footer-link hover-link  book-now-footer max-w-3xs inline-block" />
         </div>
         {!isSmallScreen && (

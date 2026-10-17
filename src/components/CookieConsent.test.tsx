@@ -6,6 +6,7 @@ import { renderToString } from 'react-dom/server'
 import CookieConsent from './CookieConsent'
 import BookNowButton from './BookNowButton'
 import BookingEmbedded from './BookingEmbedded'
+import Footer from './Nav/Footer'
 import { CONSENT_COOKIE } from '../lib/optionalTracking'
 
 vi.mock('next/navigation', () => ({ usePathname: () => '/' }))
@@ -25,8 +26,14 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-it('renders the requested choices and remembers rejection with a settings control', () => {
-  const first = render(<CookieConsent>Page content</CookieConsent>)
+it('remembers rejection and reopens cookie choices only from the footer', () => {
+  const page = (
+    <CookieConsent>
+      Page content
+      <Footer />
+    </CookieConsent>
+  )
+  const first = render(page)
   expect(
     screen.getByRole('heading', { name: 'Cookie choices' }).className,
   ).toContain('sr-only')
@@ -34,7 +41,9 @@ it('renders the requested choices and remembers rejection with a settings contro
     'I use cookies & similar tech to understand site use & help with marketing. See my Privacy Policy.',
   )
   expect(
-    screen.getByRole('link', { name: 'Privacy Policy' }).getAttribute('href'),
+    screen
+      .getAllByRole('link', { name: 'Privacy Policy' })[0]
+      .getAttribute('href'),
   ).toBe('/privacypolicy')
   const rejectButton = screen.getByRole('button', { name: 'Reject' })
   const acceptButton = screen.getByRole('button', { name: 'Accept' })
@@ -52,22 +61,20 @@ it('renders the requested choices and remembers rejection with a settings contro
   expect(document.querySelector('script')).toBeNull()
   fireEvent.click(screen.getByRole('button', { name: 'Reject' }))
   expect(screen.queryByRole('region', { name: 'Cookie choices' })).toBeNull()
-  expect(
-    screen.getByRole('button', { name: 'Change cookie settings' }),
-  ).toBeTruthy()
+  const settings = screen.getAllByRole('button', { name: 'Cookie settings' })
+  expect(settings).toHaveLength(1)
+  expect(settings[0].closest('.footer')).not.toBeNull()
   first.unmount()
-  render(<CookieConsent>Page content</CookieConsent>)
+  render(page)
   expect(screen.queryByRole('region', { name: 'Cookie choices' })).toBeNull()
-  fireEvent.click(
-    screen.getByRole('button', { name: 'Change cookie settings' }),
-  )
+  fireEvent.click(screen.getByRole('button', { name: 'Cookie settings' }))
   expect(screen.getByRole('button', { name: 'Accept' })).toBeTruthy()
   expect(screen.getByRole('button', { name: 'Close' }).className).toContain(
     'right-0',
   )
   fireEvent.click(screen.getByRole('button', { name: 'Close' }))
   expect(
-    screen.getByRole('button', { name: 'Change cookie settings' }),
+    screen.getByRole('button', { name: 'Cookie settings' }).closest('.footer'),
   ).toBeTruthy()
   expect(screen.queryByRole('region', { name: 'Cookie choices' })).toBeNull()
   expect(document.querySelector('script')).toBeNull()
@@ -100,6 +107,8 @@ it('gates booking attribution and booking conversion events on the same choice',
   )
   expect(window.dataLayer).toBeUndefined()
   fireEvent.click(screen.getByRole('button', { name: 'Accept' }))
+  expect(screen.queryByRole('region', { name: 'Cookie choices' })).toBeNull()
+  expect(screen.queryByRole('button', { name: /cookie settings/i })).toBeNull()
   expect(link.href).toContain('gclid=saved-ad-click')
   expect(document.querySelectorAll('script[src*="gtm.js"]')).toHaveLength(1)
   expect(document.querySelectorAll('script[src*="fbevents.js"]')).toHaveLength(
