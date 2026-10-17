@@ -138,12 +138,12 @@ function privacypolicy() {
         </p>
         <p>
           You can reject optional tracking or withdraw consent later using
-          Cookie settings at the bottom left of the page. Withdrawal clears
-          supported advertising and measurement cookies and may refresh the page
-          to stop tracking tags that have already loaded. A first-party
-          functional cookie remembers your choice for up to a year, including
-          when you reject optional tracking. Other open tabs on this website
-          receive updates to your choice.
+          Cookie settings in the footer. Withdrawal clears supported advertising
+          and measurement cookies and may refresh the page to stop tracking tags
+          that have already loaded. A first-party functional cookie remembers
+          your choice for up to a year, including when you reject optional
+          tracking. Other open tabs on this website receive updates to your
+          choice.
         </p>
         <p>
           With consent, we also retain Google ad click identifiers for booking
