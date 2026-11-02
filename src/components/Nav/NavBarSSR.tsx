@@ -1,6 +1,6 @@
 'use client'
 
-import absmlogo from '../../../images/logos/andrew-bolton-massage-therapy-logo.png'
+import absmlogo from '../../../images/logos/andrew-bolton-massage-therapy-logo.webp'
 import NavLinks from './NavLinks'
 import { useEffect, useRef, useState } from 'react'
 import { FaBars } from 'react-icons/fa6'
