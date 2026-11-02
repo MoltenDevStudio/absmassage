@@ -1,6 +1,6 @@
 'use client'
 
-import absmlogo from '../../../images/logos/andrew-bolton-sports-massage-logo.webp'
+import absmlogo from '../../../images/logos/andrew-bolton-massage-therapy-logo.png'
 import NavLinks from './NavLinks'
 import { useEffect, useRef, useState } from 'react'
 import { FaBars } from 'react-icons/fa6'
@@ -82,7 +82,7 @@ function NavBarSSR() {
         <img
           ref={logoRef}
           src={absmlogo.src}
-          alt="Andrew Bolton Sports Massage Christchurch logo"
+          alt="Andrew Bolton Massage Therapy logo"
         />
       </Link>
 
