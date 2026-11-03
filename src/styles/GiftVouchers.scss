@@ -1,0 +1,47 @@
+.gift-vouchers-intro {
+  margin-top: 0;
+  padding-top: 1.5rem;
+  padding-bottom: 0.5rem;
+  text-align: center;
+}
+
+.gift-vouchers-intro .p-heading {
+  margin-top: 0;
+}
+
+.gift-vouchers-page {
+  padding-top: 0.5rem;
+}
+
+.gift-vouchers-page > p {
+  max-width: 42rem;
+  margin: 1rem auto 0;
+  text-wrap: pretty;
+}
+
+.gift-vouchers-link {
+  font-size: 1.125rem;
+  margin-top: 1rem;
+  max-width: 240px;
+}
+
+.gift-vouchers-link:focus-visible {
+  outline: 3px solid var(--primary);
+  outline-offset: 4px;
+}
+
+.gift-up-widget {
+  margin: 2rem auto;
+  min-width: 0;
+  text-align: left;
+}
+
+.gift-up-target {
+  width: 100%;
+  min-width: 0;
+}
+
+.gift-vouchers-help {
+  font-size: 0.95rem;
+  text-align: center;
+}

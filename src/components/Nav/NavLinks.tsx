@@ -9,10 +9,6 @@ interface Props {
 function NavLinks({ handleOpenMenuClick }: Props) {
   return (
     <>
-      {' '}
-      <Link href={'/'} onClick={handleOpenMenuClick} className="nav-link">
-        Home
-      </Link>
       <Link
         href={'/services'}
         onClick={handleOpenMenuClick}
@@ -35,6 +31,13 @@ function NavLinks({ handleOpenMenuClick }: Props) {
       </Link>
       <Link href={'/blog'} onClick={handleOpenMenuClick} className="nav-link">
         Blog
+      </Link>
+      <Link
+        href="/gift-vouchers"
+        onClick={handleOpenMenuClick}
+        className="nav-link"
+      >
+        Gift Vouchers
       </Link>
       <BookNowButton className="nav-link nav-book-now" />
     </>

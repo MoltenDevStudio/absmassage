@@ -63,4 +63,10 @@
     <priority>0.7</priority>
     <xhtml:link rel="canonical" href="https://andrewboltonsportsmassage.com/blog/get-more-from-your-massage" />
   </url>
+  <url>
+    <loc>https://andrewboltonsportsmassage.com/gift-vouchers</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="canonical" href="https://andrewboltonsportsmassage.com/gift-vouchers" />
+  </url>
 </urlset>

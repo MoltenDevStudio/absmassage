@@ -13,6 +13,8 @@
 }
 
 #root {
+  // Keep page widgets below the sibling fixed navigation, including their controls.
+  isolation: isolate;
   margin-top: var(--nav-height);
 }
 

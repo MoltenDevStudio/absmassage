@@ -16,7 +16,7 @@ function NavBarSSR() {
   useEffect(() => {
     if (typeof window !== 'undefined') {
       setScreenSize(window.innerWidth)
-      setIsSmallScreen(window.innerWidth < 820)
+      setIsSmallScreen(window.innerWidth < 1024)
 
       const logo = logoRef.current
       if (logo?.complete) {
@@ -49,7 +49,7 @@ function NavBarSSR() {
 
   useEffect(() => {
     if (screenSize) {
-      setIsSmallScreen(screenSize < 820)
+      setIsSmallScreen(screenSize < 1024)
     }
   }, [screenSize, setIsSmallScreen])
 
@@ -68,10 +68,18 @@ function NavBarSSR() {
 `
 
   return (
-    <div
+    <nav
+      aria-label="Main navigation"
       className={`nav-bar ${isMenuOpen && isSmallScreen ? 'open' : ''}`}
       style={{
-        maxHeight: `${!isMenuOpen && isSmallScreen ? navHeight : 420}px`,
+        maxHeight: isSmallScreen
+          ? isMenuOpen
+            ? '100dvh'
+            : `${navHeight}px`
+          : 'none',
+      }}
+      onKeyDown={(event) => {
+        if (event.key === 'Escape') setIsMenuOpen(false)
       }}
     >
       <Link
@@ -90,18 +98,26 @@ function NavBarSSR() {
         <div
           className="menu-btn-container"
           style={{
-            height: `${!isMenuOpen && isSmallScreen && navHeight}px`,
-            fontSize: `${!isMenuOpen && isSmallScreen && navHeight * 0.66}px`,
-            right: `${!isMenuOpen && isSmallScreen && navHeight * 0.5}px`,
+            height: `${navHeight}px`,
+            fontSize: `${navHeight * 0.66}px`,
+            right: `${navHeight * 0.5}px`,
           }}
         >
-          <button className="menu-btn" onClick={handleMenuToggle}>
-            <FaBars />
+          <button
+            type="button"
+            className="menu-btn"
+            aria-label={isMenuOpen ? 'Close menu' : 'Open menu'}
+            aria-expanded={isMenuOpen}
+            aria-controls="main-navigation-links"
+            onClick={handleMenuToggle}
+          >
+            <FaBars aria-hidden="true" />
             <div style={{ display: 'none' }}>{ATTRIBUTION}</div>
           </button>
         </div>
       )}
       <div
+        id="main-navigation-links"
         className={`menu-container ${isMenuOpen && isSmallScreen ? 'open' : ''}`}
       >
         {!isSmallScreen ? (
@@ -111,7 +127,7 @@ function NavBarSSR() {
             <div
               className={`accordian ${isMenuOpen ? 'open' : ''}`}
               style={{
-                marginRight: `${!isMenuOpen && isSmallScreen && navHeight * 0.5}px`,
+                marginRight: `${navHeight * 0.5}px`,
               }}
             >
               <NavLinks handleOpenMenuClick={handleOpenMenuClick} />
@@ -119,7 +135,7 @@ function NavBarSSR() {
           </div>
         )}
       </div>
-    </div>
+    </nav>
   )
 }
 

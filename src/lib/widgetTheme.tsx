@@ -30,12 +30,13 @@ interface BtnProps {
   ariaLabel: string
 }
 
+// Widgets span the viewport through 800px; offset arrows only once side margins return.
 export function NextBtn({ onClick, ariaLabel }: BtnProps) {
   return (
     <button
       onClick={onClick}
       aria-label={ariaLabel}
-      className={`absolute right-0 top-1/2 z-20 -translate-y-1/2 p-2 sm:-right-3 md:-right-4 ${themeConfig.arrowButtonBg} rounded-full opacity-80 shadow-lg transition-all hover:opacity-100 focus:outline-none  focus:ring-offset-2`}
+      className={`absolute right-0 top-1/2 z-20 -translate-y-1/2 p-2 min-[801px]:-right-4 ${themeConfig.arrowButtonBg} rounded-full opacity-80 shadow-lg transition-all hover:opacity-100 focus:outline-none  focus:ring-offset-2`}
     >
       <svg
         xmlns="http://www.w3.org/2000/svg"
@@ -60,7 +61,7 @@ export function PrevBtn({ onClick, ariaLabel }: BtnProps) {
     <button
       onClick={onClick}
       aria-label={ariaLabel}
-      className={`absolute left-0 top-1/2 z-20 -translate-y-1/2 p-2 sm:-left-3 md:-left-4 ${themeConfig.arrowButtonBg} rounded-full opacity-80 shadow-lg transition-all hover:opacity-100 focus:outline-none  focus:ring-offset-2`}
+      className={`absolute left-0 top-1/2 z-20 -translate-y-1/2 p-2 min-[801px]:-left-4 ${themeConfig.arrowButtonBg} rounded-full opacity-80 shadow-lg transition-all hover:opacity-100 focus:outline-none  focus:ring-offset-2`}
     >
       <svg
         xmlns="http://www.w3.org/2000/svg"

@@ -12,6 +12,8 @@ import BookNowButton from '../components/BookNowButton.tsx'
 import { BlogWidget } from '../components/BlogWidget'
 import { getPosts } from '../lib/getBlogPosts'
 import VideoHero from '../components/VideoHero'
+import Link from 'next/link'
+import '../styles/GiftVouchers.scss'
 
 export const metadata: Metadata = {
   alternates: {
@@ -104,6 +106,17 @@ export default function Page() {
         <div className="break-line"></div>
       </div>
       <Map page="home" />
+      <section
+        className="content-container gift-vouchers-intro"
+        aria-labelledby="gift-vouchers-heading"
+      >
+        <h2 id="gift-vouchers-heading" className="p-heading">
+          Gift Vouchers
+        </h2>
+        <Link href="/gift-vouchers" className="book-now-btn gift-vouchers-link">
+          Buy a Gift Voucher
+        </Link>
+      </section>
       <BlogWidget posts={posts} />
       <BookingEmbedded />
       <Mailchimp />
