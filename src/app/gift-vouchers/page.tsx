@@ -4,7 +4,7 @@ import '../../styles/GiftVouchers.scss'
 
 const title = 'Massage Gift Vouchers Christchurch | Andrew Bolton'
 const description =
-  'Give the gift of feeling better with a personalised massage in Christchurch. Choose a gift voucher value and let them book a time that suits them.'
+  'Massage gift vouchers in Christchurch. Choose a voucher value, with email delivery or printing at home.'
 
 export const metadata: Metadata = {
   title,
@@ -28,10 +28,9 @@ export default function GiftVouchersPage() {
         <h1 className="heading">Gift Vouchers</h1>
       </div>
       <div className="content-container gift-vouchers-page">
-        <h2 className="p-heading">Give the gift of feeling better</h2>
         <p className="center">
-          Treat someone to a personalised massage. Choose a gift voucher value
-          and let them book a time that suits them.
+          Choose a gift voucher value below. Vouchers can be emailed or printed
+          at home.
         </p>
         <GiftUpWidget />
       </div>

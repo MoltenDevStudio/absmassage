@@ -106,23 +106,19 @@ export default function Page() {
         <div className="break-line"></div>
       </div>
       <Map page="home" />
-      <BlogWidget posts={posts} />
-      <BookingEmbedded />
       <section
         className="content-container gift-vouchers-intro"
         aria-labelledby="gift-vouchers-heading"
       >
         <h2 id="gift-vouchers-heading" className="p-heading">
-          Give the gift of feeling better
+          Gift Vouchers
         </h2>
-        <p>
-          Treat someone to a personalised massage. Choose a gift voucher value
-          and let them book a time that suits them.
-        </p>
         <Link href="/gift-vouchers" className="book-now-btn gift-vouchers-link">
           Buy a Gift Voucher
         </Link>
       </section>
+      <BlogWidget posts={posts} />
+      <BookingEmbedded />
       <Mailchimp />
     </div>
   )

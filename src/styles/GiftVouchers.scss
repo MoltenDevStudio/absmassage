@@ -1,7 +1,7 @@
 .gift-vouchers-intro {
   margin-top: 0;
-  padding-top: 2rem;
-  padding-bottom: 1rem;
+  padding-top: 1.5rem;
+  padding-bottom: 0.5rem;
   text-align: center;
 }
 
@@ -9,7 +9,10 @@
   margin-top: 0;
 }
 
-.gift-vouchers-intro p,
+.gift-vouchers-page {
+  padding-top: 0.5rem;
+}
+
 .gift-vouchers-page > p {
   max-width: 42rem;
   margin: 1rem auto 0;
@@ -18,7 +21,7 @@
 
 .gift-vouchers-link {
   font-size: 1.125rem;
-  margin-top: 1.25rem;
+  margin-top: 1rem;
   max-width: 240px;
 }
 
