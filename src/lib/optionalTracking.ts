@@ -1,7 +1,72 @@
 export const CONSENT_COOKIE = 'optional_tracking_consent'
 // Reuse the legacy key; only explicit choices are persisted.
 export const CONSENT_STORAGE_KEY = CONSENT_COOKIE
-const nzVisitors = new WeakSet<Window>()
+const visitorRegions = new WeakMap<Window, RegionInfo>()
+
+export type RegionInfo = {
+  country: string | null
+  region: 'NZ' | 'EEA' | 'UK' | 'CH' | 'OTHER' | 'UNKNOWN'
+}
+export type ConsentRecord = RegionInfo & {
+  version: 1
+  choices: { analytics: boolean; advertising: boolean }
+  timestamp: string
+}
+const EEA_COUNTRIES = new Set([
+  'AT',
+  'BE',
+  'BG',
+  'HR',
+  'CY',
+  'CZ',
+  'DK',
+  'EE',
+  'FI',
+  'FR',
+  'DE',
+  'GR',
+  'HU',
+  'IE',
+  'IT',
+  'LV',
+  'LT',
+  'LU',
+  'MT',
+  'NL',
+  'PL',
+  'PT',
+  'RO',
+  'SK',
+  'SI',
+  'ES',
+  'SE',
+  'IS',
+  'LI',
+  'NO',
+])
+
+export function regionForCountry(value: unknown): RegionInfo {
+  const country =
+    typeof value === 'string' &&
+    /^[A-Z]{2}$/.test(value) &&
+    value !== 'XX' &&
+    value !== 'ZZ'
+      ? value
+      : null
+  const region =
+    country === 'NZ'
+      ? 'NZ'
+      : country === 'GB'
+        ? 'UK'
+        : country === 'CH'
+          ? 'CH'
+          : country && EEA_COUNTRIES.has(country)
+            ? 'EEA'
+            : country
+              ? 'OTHER'
+              : 'UNKNOWN'
+  return { country, region }
+}
 const SYNC_CHANNEL = 'optional-tracking-consent'
 const SITE_DOMAIN = 'andrewboltonsportsmassage.com'
 const PIXEL_ID = '2126552771609777'
@@ -29,27 +94,71 @@ declare global {
   }
 }
 
-function readConsent(browser: Window): ConsentChoice {
+// The original infrastructure offered one combined analytics/advertising choice.
+// Keep legacy affirmative choices without inventing a historic consent timestamp.
+function parseChoice(value: string | null): ConsentChoice {
+  if (value === 'accepted' || value === 'rejected') return value
+  if (value === null) return null
+  try {
+    const record = JSON.parse(value) as ConsentRecord
+    const timestamp = Date.parse(record.timestamp)
+    const expectedRegion = regionForCountry(record.country)
+    if (
+      record.version !== 1 ||
+      typeof record.timestamp !== 'string' ||
+      !Number.isFinite(timestamp) ||
+      new Date(timestamp).toISOString() !== record.timestamp ||
+      timestamp > Date.now() + 60000 ||
+      record.country !== expectedRegion.country ||
+      record.region !== expectedRegion.region ||
+      typeof record.choices?.analytics !== 'boolean' ||
+      typeof record.choices?.advertising !== 'boolean' ||
+      record.choices.analytics !== record.choices.advertising
+    )
+      return null
+    return record.choices.analytics ? 'accepted' : 'rejected'
+  } catch {
+    return null
+  }
+}
+
+function readConsent(browser: Window) {
   let stored: string | null = null
   try {
     stored = browser.localStorage.getItem(CONSENT_STORAGE_KEY)
   } catch {
-    // The legacy functional cookie also works when localStorage is blocked.
+    // The existing functional cookie remains a fallback for blocked storage.
   }
-  const legacy = browser.document.cookie
-    .split('; ')
-    .find((cookie) => cookie.startsWith(`${CONSENT_COOKIE}=`))
-    ?.split('=')[1]
-  // An explicit opt-out always wins, including during migration or tab updates.
-  if (stored === 'rejected' || legacy === 'rejected') return 'rejected'
-  if (stored !== null && stored !== 'accepted') return 'rejected'
-  if (stored === 'accepted' || legacy === 'accepted') return 'accepted'
-  return null
+  let cookie: string | null = null
+  try {
+    const encoded = browser.document.cookie
+      .split('; ')
+      .find((value) => value.startsWith(`${CONSENT_COOKIE}=`))
+      ?.split('=')[1]
+    cookie = encoded === undefined ? null : decodeURIComponent(encoded)
+  } catch {
+    cookie = 'invalid'
+  }
+  const localChoice = parseChoice(stored)
+  const cookieChoice = parseChoice(cookie)
+  const present = stored !== null || cookie !== null
+  // An explicit rejection wins. Invalid records never revive an accepted default
+  // or bypass a new prompt through another store's stale acceptance.
+  const choice: ConsentChoice =
+    localChoice === 'rejected' || cookieChoice === 'rejected'
+      ? 'rejected'
+      : (stored !== null && localChoice === null) ||
+          (cookie !== null && cookieChoice === null)
+        ? null
+        : localChoice || cookieChoice
+  return { choice, present }
 }
 
 // Only a trusted server/edge response may return NZ; static exports return null.
 // Do not infer country from language, timezone, or a visitor-supplied query.
-export async function detectNzVisitor(browser: Window): Promise<boolean> {
+export async function detectVisitorRegion(
+  browser: Window,
+): Promise<RegionInfo> {
   const abort = new AbortController()
   const timeout = browser.setTimeout(() => abort.abort(), 3000)
   try {
@@ -58,11 +167,11 @@ export async function detectNzVisitor(browser: Window): Promise<boolean> {
       credentials: 'same-origin',
       signal: abort.signal,
     })
-    if (!response.ok) return false
+    if (!response.ok) return regionForCountry(null)
     const region = await response.json()
-    return region.country === 'NZ'
+    return regionForCountry(region?.country)
   } catch {
-    return false
+    return regionForCountry(null)
   } finally {
     browser.clearTimeout(timeout)
   }
@@ -75,8 +184,11 @@ export function hasOptionalTrackingConsent(
     : window,
 ) {
   if (!browser) return false
-  const choice = readConsent(browser)
-  return choice === 'accepted' || (choice === null && nzVisitors.has(browser))
+  const { choice, present } = readConsent(browser)
+  return (
+    choice === 'accepted' ||
+    (!present && visitorRegions.get(browser)?.region === 'NZ')
+  )
 }
 
 function clearTrackingCookies(browser: Window) {
@@ -105,6 +217,9 @@ export class OptionalTrackingController {
   private choice: ConsentChoice = null
   private enabled: boolean | undefined
   private regionRequested = false
+  private regionResolved = false
+  private region = regionForCountry(null)
+  private requiresConsent: boolean | undefined
   private running = false
   private pathname = ''
   private channel: BroadcastChannel | null = null
@@ -119,12 +234,18 @@ export class OptionalTrackingController {
 
   constructor(
     private browser: Window & typeof globalThis,
-    private onChoice: (choice: ConsentChoice, enabled: boolean) => void,
+    private onChoice: (
+      choice: ConsentChoice,
+      enabled: boolean,
+      requiresConsent: boolean,
+    ) => void,
     private reload: () => void = () => browser.location.reload(),
-    private detectNz: (browser: Window) => Promise<boolean> = detectNzVisitor,
+    private detectRegion: (
+      browser: Window,
+    ) => Promise<RegionInfo> = detectVisitorRegion,
   ) {
     // A new controller/document must resolve its own regional default.
-    nzVisitors.delete(browser)
+    visitorRegions.delete(browser)
   }
 
   start() {
@@ -143,17 +264,19 @@ export class OptionalTrackingController {
     this.browser.addEventListener('pageshow', this.synchronize)
     this.browser.document.addEventListener('visibilitychange', this.synchronize)
     this.synchronize()
-    if (!this.regionRequested && this.choice === null) {
+    if (!this.regionRequested) {
       this.regionRequested = true
-      void this.detectNz(this.browser)
-        .then((isNz) => {
-          if (isNz) nzVisitors.add(this.browser)
-          this.synchronize()
-        })
-        .catch(() => {
-          /* Unknown locations stay disabled. */
-        })
+      void this.detectRegion(this.browser)
+        .then(this.resolveRegion)
+        .catch(() => this.resolveRegion(regionForCountry(null)))
     }
+  }
+
+  private resolveRegion = (region: RegionInfo) => {
+    this.region = region
+    this.regionResolved = true
+    visitorRegions.set(this.browser, region)
+    this.synchronize()
   }
 
   stop() {
@@ -170,10 +293,20 @@ export class OptionalTrackingController {
   }
 
   choose(choice: Exclude<ConsentChoice, null>) {
+    const record: ConsentRecord = {
+      version: 1,
+      ...this.region,
+      choices: {
+        analytics: choice === 'accepted',
+        advertising: choice === 'accepted',
+      },
+      timestamp: new Date().toISOString(),
+    }
+    const value = JSON.stringify(record)
     const secure = this.browser.location.protocol === 'https:' ? '; Secure' : ''
-    this.browser.document.cookie = `${CONSENT_COOKIE}=${choice}; Max-Age=31536000; Path=/; SameSite=Lax${secure}`
+    this.browser.document.cookie = `${CONSENT_COOKIE}=${encodeURIComponent(value)}; Max-Age=31536000; Path=/; SameSite=Lax${secure}`
     try {
-      this.browser.localStorage.setItem(CONSENT_STORAGE_KEY, choice)
+      this.browser.localStorage.setItem(CONSENT_STORAGE_KEY, value)
     } catch {
       // Keep the existing cookie as a fallback for unavailable localStorage.
     }
@@ -188,7 +321,7 @@ export class OptionalTrackingController {
         // The cookie is durable even when cross-tab storage is unavailable.
       }
     }
-    this.apply(choice)
+    this.synchronize()
   }
 
   navigate(pathname: string) {
@@ -221,7 +354,7 @@ export class OptionalTrackingController {
   }
 
   private synchronize = () => {
-    if (this.running) this.apply(readConsent(this.browser))
+    if (this.running) this.apply(readConsent(this.browser).choice)
   }
 
   private allowed() {
@@ -234,7 +367,15 @@ export class OptionalTrackingController {
 
   private apply(choice: ConsentChoice) {
     const enabled = hasOptionalTrackingConsent(this.browser)
-    if (this.choice === choice && this.enabled === enabled) return
+    const requiresConsent =
+      this.regionResolved && this.region.region !== 'NZ' && choice === null
+    if (
+      this.choice === choice &&
+      this.enabled === enabled &&
+      this.requiresConsent === requiresConsent
+    )
+      return
+    this.requiresConsent = requiresConsent
     const wasEnabled = this.enabled
     this.choice = choice
     this.enabled = enabled
@@ -263,12 +404,12 @@ export class OptionalTrackingController {
         // Consent Mode alone can still send cookieless pings. A fresh document
         // removes already-loaded GTM listeners/timers and never loads it again
         // while the persisted choice is rejected (including in other tabs).
-        this.onChoice(choice, enabled)
+        this.onChoice(choice, enabled, requiresConsent)
         this.reload()
         return
       }
     }
-    this.onChoice(choice, enabled)
+    this.onChoice(choice, enabled, requiresConsent)
   }
 
   private googleConsent(

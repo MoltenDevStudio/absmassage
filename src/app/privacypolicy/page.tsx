@@ -117,8 +117,11 @@ function privacypolicy() {
         <p>
           For visitors in the EEA, UK or Switzerland, and whenever we cannot
           reliably identify a visitor as being in New Zealand, non-essential
-          tracking stays disabled unless you explicitly enable it through Cookie
-          settings. We do not show an automatic cookie banner.
+          tracking stays disabled until you explicitly accept. If no valid
+          preference is saved, we show a cookie banner with equally accessible
+          Accept all and Reject all options. The same consent requirement
+          applies to other visitors outside New Zealand and when location is
+          unknown. Cookie settings remains available in the footer for everyone.
         </p>
         <p>
           Google and Meta may receive information about visits, pages viewed,
@@ -150,8 +153,11 @@ function privacypolicy() {
           already loaded, to stop further tracking. Your explicit choice is
           stored in localStorage until you change it or clear your browser
           storage, with a first-party functional cookie lasting up to a year as
-          a fallback. Existing opt-outs remain respected. Other open tabs on
-          this website receive updates to your choice.
+          a fallback. New decisions include your analytics and advertising
+          choices, the country/region identified when you chose (or unknown),
+          and a timestamp. We retain existing explicit choices without inventing
+          historical consent dates. Existing opt-outs remain respected. Other
+          open tabs on this website receive updates to your choice.
         </p>
         <p>
           When tracking is enabled, we retain Google ad click identifiers for

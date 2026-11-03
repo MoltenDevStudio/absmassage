@@ -3,9 +3,11 @@ import { CookieJar, JSDOM } from 'jsdom'
 import {
   CONSENT_COOKIE,
   CONSENT_STORAGE_KEY,
-  detectNzVisitor,
+  detectVisitorRegion,
   hasOptionalTrackingConsent,
   OptionalTrackingController,
+  regionForCountry,
+  type RegionInfo,
 } from './optionalTracking'
 
 type Fixture = {
@@ -37,7 +39,8 @@ class FakeChannel {
 function tab(
   jar = new CookieJar(),
   url = 'https://www.andrewboltonsportsmassage.com/',
-  detectNz: (browser: Window) => Promise<boolean> = async () => false,
+  detectRegion: (browser: Window) => Promise<RegionInfo> = async () =>
+    regionForCountry(null),
 ): Fixture {
   const dom = new JSDOM(
     '<!doctype html><html><head></head><body></body></html>',
@@ -54,11 +57,23 @@ function tab(
     browser,
     changed,
     reload,
-    detectNz,
+    detectRegion,
   )
   const fixture = { dom, browser, changed, reload, controller }
   fixtures.push(fixture)
   return fixture
+}
+
+function savedPreference(fixture: Fixture) {
+  return JSON.parse(fixture.browser.localStorage.getItem(CONSENT_STORAGE_KEY)!)
+}
+
+function savedCookie(fixture: Fixture) {
+  const value = fixture.browser.document.cookie
+    .split('; ')
+    .find((value) => value.startsWith(`${CONSENT_COOKIE}=`))!
+    .split('=')[1]
+  return JSON.parse(decodeURIComponent(value))
 }
 
 function scripts(fixture: ReturnType<typeof tab>) {
@@ -111,7 +126,7 @@ describe('optional tracking consent', () => {
     expect(fixture.browser.fbq).toBeUndefined()
     expect(fixture.browser.dataLayer).toBeUndefined()
     expect(fixture.browser.sessionStorage.getItem('gclid')).toBeNull()
-    expect(fixture.changed).toHaveBeenLastCalledWith(null, false)
+    expect(fixture.changed).toHaveBeenLastCalledWith(null, false, false)
   })
 
   it('persists rejection across visits without loading trackers', () => {
@@ -121,10 +136,13 @@ describe('optional tracking consent', () => {
     first.controller.choose('rejected')
     const next = tab(jar)
     next.controller.start()
-    expect(next.changed).toHaveBeenLastCalledWith('rejected', false)
+    expect(next.changed).toHaveBeenLastCalledWith('rejected', false, false)
     expect(scripts(first)).toEqual([])
     expect(scripts(next)).toEqual([])
-    expect(next.browser.document.cookie).toContain(`${CONSENT_COOKIE}=rejected`)
+    expect(savedCookie(next).choices).toEqual({
+      analytics: false,
+      advertising: false,
+    })
   })
 
   it('keeps GTM denied if consent is withdrawn while its script is loading', () => {
@@ -349,9 +367,10 @@ describe('optional tracking consent', () => {
     )
     expect(fixture.browser.document.cookie).not.toMatch(/_fbp|_fbc|_ga|_gcl_/)
     expect(fixture.browser.document.cookie).toContain('booking_preference=keep')
-    expect(fixture.browser.document.cookie).toContain(
-      `${CONSENT_COOKIE}=rejected`,
-    )
+    expect(savedCookie(fixture).choices).toEqual({
+      analytics: false,
+      advertising: false,
+    })
     expect(fixture.browser.sessionStorage.getItem('gclid')).toBeNull()
     const lastGoogleCommand = Array.from(
       fixture.browser.dataLayer!.at(-1) as IArguments,
@@ -390,12 +409,12 @@ describe('optional tracking consent', () => {
     first.controller.start()
     second.controller.start()
     first.controller.choose('accepted')
-    expect(second.changed).toHaveBeenLastCalledWith('accepted', true)
+    expect(second.changed).toHaveBeenLastCalledWith('accepted', true, false)
     expect(scripts(second)).toHaveLength(2)
     const firstPixel = finishMeta(first)
     const secondPixel = finishMeta(second)
     first.controller.choose('rejected')
-    expect(second.changed).toHaveBeenLastCalledWith('rejected', false)
+    expect(second.changed).toHaveBeenLastCalledWith('rejected', false, false)
     second.controller.navigate('/contact')
     expect(secondPixel).toHaveBeenLastCalledWith('consent', 'revoke')
     expect(
@@ -415,7 +434,7 @@ describe('optional tracking consent', () => {
     expect(pixel.mock.calls.filter((call) => call[0] === 'track')).toHaveLength(
       0,
     )
-    expect(fixture.changed).toHaveBeenLastCalledWith('rejected', false)
+    expect(fixture.changed).toHaveBeenLastCalledWith('rejected', false, false)
   })
 
   it('uses current cross-tab consent when Meta finishes loading', () => {
@@ -429,7 +448,7 @@ describe('optional tracking consent', () => {
     second.controller.navigate('/contact')
     first.controller.choose('rejected')
     const pixel = finishMeta(second)
-    expect(second.changed).toHaveBeenLastCalledWith('rejected', false)
+    expect(second.changed).toHaveBeenLastCalledWith('rejected', false, false)
     expect(
       pixel.mock.calls.filter(
         (call) => call[0] === 'init' || call[0] === 'track',
@@ -447,7 +466,7 @@ describe('optional tracking consent', () => {
       'https://www.andrewboltonsportsmassage.com/?gclid=new-click',
     )
     returning.controller.start()
-    expect(returning.changed).toHaveBeenLastCalledWith('accepted', true)
+    expect(returning.changed).toHaveBeenLastCalledWith('accepted', true, false)
     expect(scripts(returning)).toHaveLength(2)
     expect(returning.browser.sessionStorage.getItem('gclid')).toBe('new-click')
     returning.controller.choose('rejected')
@@ -467,7 +486,7 @@ describe('optional tracking consent', () => {
         key: 'optional-tracking-consent',
       }),
     )
-    expect(fixture.changed).toHaveBeenLastCalledWith('accepted', true)
+    expect(fixture.changed).toHaveBeenLastCalledWith('accepted', true, false)
     fixture.controller.choose('rejected')
     expect(
       fixture.browser.localStorage.getItem('optional-tracking-consent'),
@@ -477,7 +496,7 @@ describe('optional tracking consent', () => {
 
 describe('regional defaults and preference migration', () => {
   it('starts tracking for confirmed NZ without persisting acceptance, and does not duplicate scripts/events', async () => {
-    const detect = vi.fn(async () => true)
+    const detect = vi.fn(async () => regionForCountry('NZ'))
     const fixture = tab(
       undefined,
       'https://www.andrewboltonsportsmassage.com/?gclid=nz-click',
@@ -486,7 +505,7 @@ describe('regional defaults and preference migration', () => {
     fixture.controller.start()
     expect(scripts(fixture)).toHaveLength(0)
     await vi.waitFor(() => expect(scripts(fixture)).toHaveLength(2))
-    expect(fixture.changed).toHaveBeenLastCalledWith(null, true)
+    expect(fixture.changed).toHaveBeenLastCalledWith(null, true, false)
     expect(fixture.browser.localStorage.getItem(CONSENT_STORAGE_KEY)).toBeNull()
     expect(fixture.browser.document.cookie).not.toContain(CONSENT_COOKIE)
     expect(fixture.browser.sessionStorage.getItem('gclid')).toBe('nz-click')
@@ -506,9 +525,10 @@ describe('regional defaults and preference migration', () => {
       1,
     )
     fixture.controller.choose('rejected')
-    expect(fixture.browser.localStorage.getItem(CONSENT_STORAGE_KEY)).toBe(
-      'rejected',
-    )
+    expect(savedPreference(fixture).choices).toEqual({
+      analytics: false,
+      advertising: false,
+    })
     expect(hasOptionalTrackingConsent(fixture.browser)).toBe(false)
     expect(fixture.reload).toHaveBeenCalledOnce()
   })
@@ -517,7 +537,7 @@ describe('regional defaults and preference migration', () => {
     'keeps %s disabled without affirmative consent',
     async (country) => {
       const fixture = tab(undefined, undefined, (browser) =>
-        detectNzVisitor(browser),
+        detectVisitorRegion(browser),
       )
       fixture.browser.fetch = vi
         .fn()
@@ -531,9 +551,10 @@ describe('regional defaults and preference migration', () => {
       expect(hasOptionalTrackingConsent(fixture.browser)).toBe(false)
       fixture.controller.choose('accepted')
       expect(scripts(fixture)).toHaveLength(2)
-      expect(fixture.browser.localStorage.getItem(CONSENT_STORAGE_KEY)).toBe(
-        'accepted',
-      )
+      expect(savedPreference(fixture).choices).toEqual({
+        analytics: true,
+        advertising: true,
+      })
     },
   )
 
@@ -547,6 +568,7 @@ describe('regional defaults and preference migration', () => {
       expect(fixture.changed).toHaveBeenLastCalledWith(
         choice,
         choice === 'accepted',
+        false,
       )
     },
   )
@@ -554,7 +576,9 @@ describe('regional defaults and preference migration', () => {
   it.each(['accepted', 'rejected'] as const)(
     'preserves legacy cookie %s for NZ visitors',
     async (choice) => {
-      const fixture = tab(undefined, undefined, async () => true)
+      const fixture = tab(undefined, undefined, async () =>
+        regionForCountry('NZ'),
+      )
       fixture.browser.document.cookie = `${CONSENT_COOKIE}=${choice}; Path=/`
       fixture.controller.start()
       await Promise.resolve()
@@ -566,7 +590,7 @@ describe('regional defaults and preference migration', () => {
   )
 
   it('honours rejection while a NZ lookup is pending', async () => {
-    let resolve!: (isNz: boolean) => void
+    let resolve!: (region: RegionInfo) => void
     const fixture = tab(
       undefined,
       undefined,
@@ -577,14 +601,16 @@ describe('regional defaults and preference migration', () => {
     )
     fixture.controller.start()
     fixture.controller.choose('rejected')
-    resolve(true)
+    resolve(regionForCountry('NZ'))
     await Promise.resolve()
     expect(scripts(fixture)).toHaveLength(0)
-    expect(fixture.changed).toHaveBeenLastCalledWith('rejected', false)
+    expect(fixture.changed).toHaveBeenLastCalledWith('rejected', false, false)
   })
 
   it('gives a legacy rejection precedence over stored acceptance', () => {
-    const fixture = tab(undefined, undefined, async () => true)
+    const fixture = tab(undefined, undefined, async () =>
+      regionForCountry('NZ'),
+    )
     fixture.browser.localStorage.setItem(CONSENT_STORAGE_KEY, 'accepted')
     fixture.browser.document.cookie = `${CONSENT_COOKIE}=rejected; Path=/`
     fixture.controller.start()
@@ -602,13 +628,16 @@ describe('regional defaults and preference migration', () => {
     fixture.controller.choose('accepted')
     expect(scripts(fixture)).toHaveLength(2)
     fixture.controller.choose('rejected')
-    expect(fixture.browser.document.cookie).toContain(
-      `${CONSENT_COOKIE}=rejected`,
-    )
+    expect(savedCookie(fixture).choices).toEqual({
+      analytics: false,
+      advertising: false,
+    })
   })
 
   it('uses localStorage storage events and rechecks opt-outs before booking events', async () => {
-    const fixture = tab(undefined, undefined, async () => true)
+    const fixture = tab(undefined, undefined, async () =>
+      regionForCountry('NZ'),
+    )
     fixture.controller.start()
     await Promise.resolve()
     fixture.browser.document
@@ -638,7 +667,149 @@ describe('regional defaults and preference migration', () => {
                 throw new Error('not JSON')
               },
             })
-      expect(await detectNzVisitor(fixture.browser)).toBe(false)
+      expect(await detectVisitorRegion(fixture.browser)).toEqual(
+        regionForCountry(null),
+      )
     },
   )
+})
+
+describe('regional banner and consent records', () => {
+  it.each(['NZ', 'DE', 'NO', 'IS', 'LI', 'GB', 'CH', 'US', null])(
+    'persists region, category choices and timestamp for %s and reuses decisions on return',
+    async (country) => {
+      const jar = new CookieJar()
+      const detect = async () => regionForCountry(country)
+      const fixture = tab(jar, undefined, detect)
+      fixture.controller.start()
+      await vi.waitFor(() =>
+        expect(fixture.changed).toHaveBeenLastCalledWith(
+          null,
+          country === 'NZ',
+          country !== 'NZ',
+        ),
+      )
+      expect(
+        fixture.browser.localStorage.getItem(CONSENT_STORAGE_KEY),
+      ).toBeNull()
+      fixture.controller.choose('accepted')
+      const accepted = savedPreference(fixture)
+      expect(accepted).toMatchObject({
+        version: 1,
+        ...regionForCountry(country),
+        choices: { analytics: true, advertising: true },
+      })
+      expect(savedCookie(fixture)).toEqual(accepted)
+      expect(
+        Math.abs(Date.now() - Date.parse(accepted.timestamp)),
+      ).toBeLessThan(1000)
+      expect(scripts(fixture)).toHaveLength(2)
+      const returning = tab(jar, undefined, detect)
+      returning.controller.start()
+      await Promise.resolve()
+      expect(returning.changed).toHaveBeenLastCalledWith(
+        'accepted',
+        true,
+        false,
+      )
+      expect(scripts(returning)).toHaveLength(2)
+      returning.controller.choose('rejected')
+      expect(savedPreference(returning)).toMatchObject({
+        ...regionForCountry(country),
+        choices: { analytics: false, advertising: false },
+      })
+      const rejectedReturn = tab(jar, undefined, detect)
+      rejectedReturn.controller.start()
+      await Promise.resolve()
+      expect(rejectedReturn.changed).toHaveBeenLastCalledWith(
+        'rejected',
+        false,
+        false,
+      )
+      expect(scripts(rejectedReturn)).toHaveLength(0)
+    },
+  )
+
+  it.each([
+    'not JSON',
+    JSON.stringify({
+      version: 1,
+      country: 'DE',
+      region: 'EEA',
+      choices: { analytics: true, advertising: true },
+    }),
+    JSON.stringify({
+      version: 2,
+      country: 'DE',
+      region: 'EEA',
+      timestamp: new Date().toISOString(),
+      choices: { analytics: true, advertising: true },
+    }),
+    JSON.stringify({
+      version: 1,
+      country: 'DE',
+      region: 'NZ',
+      timestamp: new Date().toISOString(),
+      choices: { analytics: true, advertising: true },
+    }),
+    JSON.stringify({
+      version: 1,
+      country: 'DE',
+      region: 'EEA',
+      timestamp: new Date().toISOString(),
+      choices: { analytics: true, advertising: false },
+    }),
+    JSON.stringify({
+      version: 1,
+      country: 'DE',
+      region: 'EEA',
+      timestamp: new Date(Date.now() + 3600000).toISOString(),
+      choices: { analytics: true, advertising: true },
+    }),
+  ])('requires a fresh decision for invalid records (%s)', async (value) => {
+    const fixture = tab(undefined, undefined, async () =>
+      regionForCountry('DE'),
+    )
+    fixture.browser.localStorage.setItem(CONSENT_STORAGE_KEY, value)
+    fixture.browser.document.cookie = `${CONSENT_COOKIE}=accepted; Path=/`
+    fixture.controller.start()
+    await vi.waitFor(() =>
+      expect(fixture.changed).toHaveBeenLastCalledWith(null, false, true),
+    )
+    expect(scripts(fixture)).toHaveLength(0)
+    expect(hasOptionalTrackingConsent(fixture.browser)).toBe(false)
+  })
+
+  it('never turns invalid saved preferences into automatic NZ acceptance', async () => {
+    const fixture = tab(undefined, undefined, async () =>
+      regionForCountry('NZ'),
+    )
+    fixture.browser.localStorage.setItem(CONSENT_STORAGE_KEY, 'invalid')
+    fixture.controller.start()
+    await Promise.resolve()
+    expect(scripts(fixture)).toHaveLength(0)
+    expect(hasOptionalTrackingConsent(fixture.browser)).toBe(false)
+  })
+
+  it('requires consent after a country lookup timeout and keeps advertising unloaded', async () => {
+    vi.useFakeTimers()
+    try {
+      const fixture = tab(undefined, undefined, detectVisitorRegion)
+      fixture.browser.fetch = vi.fn(
+        (_url, init) =>
+          new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () =>
+              reject(new Error('timeout')),
+            )
+          }),
+      )
+      fixture.controller.start()
+      expect(fixture.changed).toHaveBeenLastCalledWith(null, false, false)
+      await vi.advanceTimersByTimeAsync(3000)
+      expect(fixture.changed).toHaveBeenLastCalledWith(null, false, true)
+      expect(scripts(fixture)).toHaveLength(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })

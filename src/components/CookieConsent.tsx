@@ -43,13 +43,15 @@ export default function CookieConsent({
   const pathname = usePathname()
   const [consent, setConsent] = useState<ConsentChoice>(null)
   const [trackingEnabled, setTrackingEnabled] = useState(false)
+  const [requiresConsent, setRequiresConsent] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const controller = useRef<OptionalTrackingController | null>(null)
 
   useEffect(() => {
     controller.current ??= new OptionalTrackingController(
       window,
-      (choice, enabled) => {
+      (choice, enabled, prompt) => {
+        setRequiresConsent(prompt)
         setConsent(choice)
         setTrackingEnabled(enabled)
       },
@@ -97,7 +99,7 @@ export default function CookieConsent({
           />
         </>
       )}
-      {settingsOpen && (
+      {(settingsOpen || requiresConsent) && (
         <aside
           aria-labelledby="cookie-consent-heading"
           className="fixed inset-x-0 bottom-0 z-[100] border-t border-gray-200 bg-white px-4 py-2 text-left text-gray-900 shadow-2xl sm:px-6"
@@ -108,9 +110,10 @@ export default function CookieConsent({
               Cookie settings
             </h2>
             <p className="my-0 max-w-3xl text-sm leading-relaxed">
-              Analytics and advertising tracking is currently{' '}
-              {trackingEnabled ? 'enabled' : 'disabled'}. You can disable or
-              enable both below. See my{' '}
+              I use analytics and advertising cookies to understand website use
+              and measure marketing. Tracking is currently{' '}
+              {trackingEnabled ? 'enabled' : 'disabled'}. You can accept or
+              reject both below. See my{' '}
               <a className="underline" href="/privacypolicy">
                 Privacy Policy
               </a>
@@ -123,23 +126,25 @@ export default function CookieConsent({
                   onClick={() => chooseConsent('rejected')}
                   type="button"
                 >
-                  Disable tracking
+                  Reject all
                 </button>
                 <button
-                  className="min-h-10 rounded-lg bg-[#1f4c3c] px-4 py-1.5 text-sm font-semibold text-white hover:bg-[#17392d] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+                  className="min-h-10 rounded-lg border border-gray-400 px-4 py-1.5 text-sm font-semibold hover:bg-gray-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
                   onClick={() => chooseConsent('accepted')}
                   type="button"
                 >
-                  Enable tracking
+                  Accept all
                 </button>
               </div>
-              <button
-                className="rounded px-3 py-2 text-sm underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
-                onClick={() => setSettingsOpen(false)}
-                type="button"
-              >
-                Close
-              </button>
+              {!requiresConsent && (
+                <button
+                  className="rounded px-3 py-2 text-sm underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+                  onClick={() => setSettingsOpen(false)}
+                  type="button"
+                >
+                  Close
+                </button>
+              )}
             </div>
           </div>
         </aside>

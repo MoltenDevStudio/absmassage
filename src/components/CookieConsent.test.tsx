@@ -39,7 +39,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-it('shows settings only from the footer, allows closing without a choice, and remembers rejection', () => {
+it('keeps footer settings available and remembers explicit choices', () => {
   const page = (
     <CookieConsent>
       Page content
@@ -56,8 +56,10 @@ it('shows settings only from the footer, allows closing without a choice, and re
   fireEvent.click(screen.getByRole('button', { name: 'Close' }))
   expect(localStorage.getItem(CONSENT_STORAGE_KEY)).toBeNull()
   openSettings()
-  fireEvent.click(screen.getByRole('button', { name: 'Disable tracking' }))
-  expect(localStorage.getItem(CONSENT_STORAGE_KEY)).toBe('rejected')
+  fireEvent.click(screen.getByRole('button', { name: 'Reject all' }))
+  expect(
+    JSON.parse(localStorage.getItem(CONSENT_STORAGE_KEY)!).choices,
+  ).toEqual({ analytics: false, advertising: false })
   expect(screen.queryByRole('region', { name: 'Cookie settings' })).toBeNull()
   expect(
     screen.getByRole('button', { name: 'Cookie settings' }).closest('.footer'),
@@ -69,8 +71,10 @@ it('shows settings only from the footer, allows closing without a choice, and re
   expect(document.querySelector('aside p')?.textContent).toContain(
     'currently disabled',
   )
-  fireEvent.click(screen.getByRole('button', { name: 'Enable tracking' }))
-  expect(localStorage.getItem(CONSENT_STORAGE_KEY)).toBe('accepted')
+  fireEvent.click(screen.getByRole('button', { name: 'Accept all' }))
+  expect(
+    JSON.parse(localStorage.getItem(CONSENT_STORAGE_KEY)!).choices,
+  ).toEqual({ analytics: true, advertising: true })
   expect(document.querySelectorAll('script[src*="gtm.js"]')).toHaveLength(1)
 })
 
@@ -131,7 +135,7 @@ it('gates booking attribution and booking conversion events on the same choice',
   )
   expect(window.dataLayer).toBeUndefined()
   fireEvent.click(screen.getByRole('button', { name: 'Cookie settings' }))
-  fireEvent.click(screen.getByRole('button', { name: 'Enable tracking' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Accept all' }))
   expect(screen.queryByRole('region', { name: 'Cookie settings' })).toBeNull()
   expect(screen.getByRole('button', { name: /cookie settings/i })).toBeTruthy()
   expect(link.href).toContain('gclid=saved-ad-click')
@@ -177,4 +181,83 @@ it('gates booking attribution and booking conversion events on the same choice',
   ).toHaveLength(2)
   fireEvent.click(link)
   expect(link.href).not.toContain('gclid')
+})
+
+it.each(['DE', 'NO', 'IS', 'LI', 'GB', 'CH', 'US', null])(
+  'shows the existing banner for %s with equal accept/reject controls and no trackers',
+  async (country) => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: true, json: async () => ({ country }) }),
+    )
+    render(
+      <CookieConsent>
+        <Footer />
+      </CookieConsent>,
+    )
+    await screen.findByRole('region', { name: 'Cookie settings' })
+    const accept = screen.getByRole('button', { name: 'Accept all' })
+    const reject = screen.getByRole('button', { name: 'Reject all' })
+    expect(accept.className).toBe(reject.className)
+    expect(document.querySelectorAll('script')).toHaveLength(0)
+    expect(localStorage.getItem(CONSENT_STORAGE_KEY)).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Close' })).toBeNull()
+    fireEvent.click(reject)
+    expect(screen.queryByRole('region', { name: 'Cookie settings' })).toBeNull()
+    expect(document.querySelectorAll('script')).toHaveLength(0)
+    const decision = JSON.parse(localStorage.getItem(CONSENT_STORAGE_KEY)!)
+    expect(decision.country).toBe(country)
+    expect(decision.choices).toEqual({ analytics: false, advertising: false })
+    expect(Number.isFinite(Date.parse(decision.timestamp))).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: 'Cookie settings' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Accept all' }))
+    expect(document.querySelectorAll('script[src*="gtm.js"]')).toHaveLength(1)
+    expect(
+      document.querySelectorAll('script[src*="fbevents.js"]'),
+    ).toHaveLength(1)
+    expect(
+      JSON.parse(localStorage.getItem(CONSENT_STORAGE_KEY)!).choices,
+    ).toEqual({ analytics: true, advertising: true })
+  },
+)
+
+it.each(['accepted', 'rejected'] as const)(
+  'does not prompt a returning European visitor with legacy %s preferences',
+  async (choice) => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValue({ ok: true, json: async () => ({ country: 'DE' }) }),
+    )
+    document.cookie = `${CONSENT_COOKIE}=${choice}; Path=/`
+    render(
+      <CookieConsent>
+        <Footer />
+      </CookieConsent>,
+    )
+    await waitFor(() => expect(fetch).toHaveBeenCalledOnce())
+    expect(screen.queryByRole('region', { name: 'Cookie settings' })).toBeNull()
+    expect(document.querySelectorAll('script[src*="gtm.js"]')).toHaveLength(
+      choice === 'accepted' ? 1 : 0,
+    )
+    expect(localStorage.getItem(CONSENT_STORAGE_KEY)).toBeNull()
+  },
+)
+
+it('requires consent after a failed lookup, without loading advertising scripts', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')))
+  render(
+    <CookieConsent>
+      <Footer />
+    </CookieConsent>,
+  )
+  await screen.findByRole('button', { name: 'Accept all' })
+  expect(document.querySelectorAll('script')).toHaveLength(0)
+  fireEvent.click(screen.getByRole('button', { name: 'Accept all' }))
+  expect(JSON.parse(localStorage.getItem(CONSENT_STORAGE_KEY)!)).toMatchObject({
+    region: 'UNKNOWN',
+    country: null,
+    choices: { analytics: true, advertising: true },
+  })
 })
