@@ -1,4 +1,7 @@
 export const CONSENT_COOKIE = 'optional_tracking_consent'
+// Reuse the legacy key; only explicit choices are persisted.
+export const CONSENT_STORAGE_KEY = CONSENT_COOKIE
+const nzVisitors = new WeakSet<Window>()
 const SYNC_CHANNEL = 'optional-tracking-consent'
 const SITE_DOMAIN = 'andrewboltonsportsmassage.com'
 const PIXEL_ID = '2126552771609777'
@@ -8,6 +11,7 @@ export type ConsentChoice = 'accepted' | 'rejected' | null
 type PixelCommand =
   | ['consent', 'grant' | 'revoke']
   | ['init', string]
+  | ['set', 'autoConfig', false, string]
   | ['track', 'PageView']
 type PixelFunction = ((...args: PixelCommand) => void) & {
   callMethod?: (...args: PixelCommand) => void
@@ -26,17 +30,53 @@ declare global {
 }
 
 function readConsent(browser: Window): ConsentChoice {
-  const value = browser.document.cookie
+  let stored: string | null = null
+  try {
+    stored = browser.localStorage.getItem(CONSENT_STORAGE_KEY)
+  } catch {
+    // The legacy functional cookie also works when localStorage is blocked.
+  }
+  const legacy = browser.document.cookie
     .split('; ')
     .find((cookie) => cookie.startsWith(`${CONSENT_COOKIE}=`))
     ?.split('=')[1]
-  return value === 'accepted' || value === 'rejected' ? value : null
+  // An explicit opt-out always wins, including during migration or tab updates.
+  if (stored === 'rejected' || legacy === 'rejected') return 'rejected'
+  if (stored !== null && stored !== 'accepted') return 'rejected'
+  if (stored === 'accepted' || legacy === 'accepted') return 'accepted'
+  return null
 }
 
-// Use this boundary for booking events/links too, including while a tab update
-// is still in transit. Components do not maintain separate consent decisions.
-export function hasOptionalTrackingConsent() {
-  return typeof window !== 'undefined' && readConsent(window) === 'accepted'
+// Only a trusted server/edge response may return NZ; static exports return null.
+// Do not infer country from language, timezone, or a visitor-supplied query.
+export async function detectNzVisitor(browser: Window): Promise<boolean> {
+  const abort = new AbortController()
+  const timeout = browser.setTimeout(() => abort.abort(), 3000)
+  try {
+    const response = await browser.fetch('/api/tracking-region', {
+      cache: 'no-store',
+      credentials: 'same-origin',
+      signal: abort.signal,
+    })
+    if (!response.ok) return false
+    const region = await response.json()
+    return region.country === 'NZ'
+  } catch {
+    return false
+  } finally {
+    browser.clearTimeout(timeout)
+  }
+}
+
+// Booking attribution and late events recheck the durable choice too.
+export function hasOptionalTrackingConsent(
+  browser: Window | undefined = typeof window === 'undefined'
+    ? undefined
+    : window,
+) {
+  if (!browser) return false
+  const choice = readConsent(browser)
+  return choice === 'accepted' || (choice === null && nzVisitors.has(browser))
 }
 
 function clearTrackingCookies(browser: Window) {
@@ -63,6 +103,8 @@ function clearTrackingCookies(browser: Window) {
 
 export class OptionalTrackingController {
   private choice: ConsentChoice = null
+  private enabled: boolean | undefined
+  private regionRequested = false
   private running = false
   private pathname = ''
   private channel: BroadcastChannel | null = null
@@ -77,9 +119,13 @@ export class OptionalTrackingController {
 
   constructor(
     private browser: Window & typeof globalThis,
-    private onChoice: (choice: ConsentChoice) => void,
+    private onChoice: (choice: ConsentChoice, enabled: boolean) => void,
     private reload: () => void = () => browser.location.reload(),
-  ) {}
+    private detectNz: (browser: Window) => Promise<boolean> = detectNzVisitor,
+  ) {
+    // A new controller/document must resolve its own regional default.
+    nzVisitors.delete(browser)
+  }
 
   start() {
     this.running = true
@@ -97,7 +143,17 @@ export class OptionalTrackingController {
     this.browser.addEventListener('pageshow', this.synchronize)
     this.browser.document.addEventListener('visibilitychange', this.synchronize)
     this.synchronize()
-    this.onChoice(this.choice)
+    if (!this.regionRequested && this.choice === null) {
+      this.regionRequested = true
+      void this.detectNz(this.browser)
+        .then((isNz) => {
+          if (isNz) nzVisitors.add(this.browser)
+          this.synchronize()
+        })
+        .catch(() => {
+          /* Unknown locations stay disabled. */
+        })
+    }
   }
 
   stop() {
@@ -116,6 +172,11 @@ export class OptionalTrackingController {
   choose(choice: Exclude<ConsentChoice, null>) {
     const secure = this.browser.location.protocol === 'https:' ? '; Secure' : ''
     this.browser.document.cookie = `${CONSENT_COOKIE}=${choice}; Max-Age=31536000; Path=/; SameSite=Lax${secure}`
+    try {
+      this.browser.localStorage.setItem(CONSENT_STORAGE_KEY, choice)
+    } catch {
+      // Keep the existing cookie as a fallback for unavailable localStorage.
+    }
     if (this.channel) this.channel.postMessage('changed')
     else {
       try {
@@ -151,7 +212,12 @@ export class OptionalTrackingController {
   }
 
   private onStorage = (event: StorageEvent) => {
-    if (event.key === SYNC_CHANNEL) this.synchronize()
+    if (
+      event.key === SYNC_CHANNEL ||
+      event.key === CONSENT_STORAGE_KEY ||
+      event.key === null
+    )
+      this.synchronize()
   }
 
   private synchronize = () => {
@@ -161,15 +227,18 @@ export class OptionalTrackingController {
   private allowed() {
     return (
       this.running &&
-      this.choice === 'accepted' &&
-      readConsent(this.browser) === 'accepted'
+      this.enabled === true &&
+      hasOptionalTrackingConsent(this.browser)
     )
   }
 
   private apply(choice: ConsentChoice) {
-    if (this.choice === choice) return
+    const enabled = hasOptionalTrackingConsent(this.browser)
+    if (this.choice === choice && this.enabled === enabled) return
+    const wasEnabled = this.enabled
     this.choice = choice
-    if (choice === 'accepted') {
+    this.enabled = enabled
+    if (enabled) {
       this.captureGclid()
       this.loadGoogle()
       this.loadMeta()
@@ -180,24 +249,26 @@ export class OptionalTrackingController {
       if (this.metaReady) this.browser.fbq?.('consent', 'revoke')
       this.metaGranted = false
       this.lastTrackedPathname = null
-      clearTrackingCookies(this.browser)
-      try {
-        this.browser.sessionStorage.removeItem('gclid')
-      } catch {
-        /* Storage may be disabled. */
+      if (choice === 'rejected' || wasEnabled) {
+        clearTrackingCookies(this.browser)
+        try {
+          this.browser.sessionStorage.removeItem('gclid')
+        } catch {
+          /* Storage may be disabled. */
+        }
+        this.cleanGclidUrl()
       }
-      this.cleanGclidUrl()
       if (this.googleStarted) {
         this.googleConsent('update', 'denied')
         // Consent Mode alone can still send cookieless pings. A fresh document
         // removes already-loaded GTM listeners/timers and never loads it again
         // while the persisted choice is rejected (including in other tabs).
-        this.onChoice(choice)
+        this.onChoice(choice, enabled)
         this.reload()
         return
       }
     }
-    this.onChoice(choice)
+    this.onChoice(choice, enabled)
   }
 
   private googleConsent(
@@ -297,6 +368,8 @@ export class OptionalTrackingController {
       this.metaGranted = true
     }
     if (!this.metaInitialized) {
+      // Disable automatic event/metadata collection; never pass matching data.
+      this.browser.fbq?.('set', 'autoConfig', false, PIXEL_ID)
       this.browser.fbq?.('init', PIXEL_ID)
       this.metaInitialized = true
     }
@@ -315,7 +388,7 @@ export class OptionalTrackingController {
     } catch {
       /* Attribution is optional when storage is unavailable. */
     }
-    // Retain the landing query while accepted so delayed Google tags can read
+    // Retain the landing query while enabled so delayed Google tags can read
     // it too. Rejection removes it and the session copy before reloading.
   }
 

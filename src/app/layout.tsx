@@ -3,8 +3,6 @@ import '../styles/NavBar.scss'
 // import NavBarSSR from '../components/Nav/NavBar'
 import dynamic from 'next/dynamic'
 import type { Metadata } from 'next'
-import { Analytics } from '@vercel/analytics/react'
-import { SpeedInsights } from '@vercel/speed-insights/next'
 import { Raleway } from 'next/font/google'
 import CookieConsent from '../components/CookieConsent.tsx'
 
@@ -117,8 +115,6 @@ export default function RootLayout({
           <NavBarSSR />
 
           <div id="root">{children}</div>
-          <Analytics />
-          <SpeedInsights />
           <Footer />
         </CookieConsent>
       </body>

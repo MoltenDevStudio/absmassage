@@ -1,13 +1,19 @@
 // @vitest-environment jsdom
 import React from 'react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react'
 import { renderToString } from 'react-dom/server'
 import CookieConsent from './CookieConsent'
 import BookNowButton from './BookNowButton'
 import BookingEmbedded from './BookingEmbedded'
 import Footer from './Nav/Footer'
-import { CONSENT_COOKIE } from '../lib/optionalTracking'
+import { CONSENT_COOKIE, CONSENT_STORAGE_KEY } from '../lib/optionalTracking'
 
 vi.mock('next/navigation', () => ({ usePathname: () => '/' }))
 
@@ -20,13 +26,20 @@ beforeEach(() => {
   delete window._fbq
   delete window.dataLayer
   sessionStorage.clear()
+  localStorage.clear()
+  vi.stubGlobal(
+    'fetch',
+    vi
+      .fn()
+      .mockResolvedValue({ ok: true, json: async () => ({ country: null }) }),
+  )
 })
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
 })
 
-it('remembers rejection and reopens cookie choices only from the footer', () => {
+it('shows settings only from the footer, allows closing without a choice, and remembers rejection', () => {
   const page = (
     <CookieConsent>
       Page content
@@ -34,50 +47,60 @@ it('remembers rejection and reopens cookie choices only from the footer', () => 
     </CookieConsent>
   )
   const first = render(page)
-  expect(
-    screen.getByRole('heading', { name: 'Cookie choices' }).className,
-  ).toContain('sr-only')
-  expect(document.querySelector('aside p')?.textContent).toBe(
-    'I use cookies & similar tech to understand site use & help with marketing. See my Privacy Policy.',
-  )
-  expect(
-    screen
-      .getAllByRole('link', { name: 'Privacy Policy' })[0]
-      .getAttribute('href'),
-  ).toBe('/privacypolicy')
-  const rejectButton = screen.getByRole('button', { name: 'Reject' })
-  const acceptButton = screen.getByRole('button', { name: 'Accept' })
-  expect(rejectButton.parentElement).toBe(acceptButton.parentElement)
-  expect(rejectButton.parentElement?.className).toContain('flex gap-2')
-  expect(rejectButton.parentElement?.parentElement?.className).toContain(
-    'justify-center',
-  )
-  expect(rejectButton.className).toContain('min-h-10')
-  expect(rejectButton.className).toContain('py-1.5')
-  expect(rejectButton.className).toContain('rounded-lg')
-  expect(acceptButton.className).toContain('min-h-10')
-  expect(acceptButton.className).toContain('py-1.5')
-  expect(acceptButton.className).toContain('rounded-lg')
-  expect(document.querySelector('script')).toBeNull()
-  fireEvent.click(screen.getByRole('button', { name: 'Reject' }))
-  expect(screen.queryByRole('region', { name: 'Cookie choices' })).toBeNull()
-  const settings = screen.getAllByRole('button', { name: 'Cookie settings' })
-  expect(settings).toHaveLength(1)
-  expect(settings[0].closest('.footer')).not.toBeNull()
-  first.unmount()
-  render(page)
-  expect(screen.queryByRole('region', { name: 'Cookie choices' })).toBeNull()
-  fireEvent.click(screen.getByRole('button', { name: 'Cookie settings' }))
-  expect(screen.getByRole('button', { name: 'Accept' })).toBeTruthy()
-  expect(screen.getByRole('button', { name: 'Close' }).className).toContain(
-    'right-0',
-  )
+  expect(screen.queryByRole('region', { name: 'Cookie settings' })).toBeNull()
+  expect(localStorage.getItem(CONSENT_STORAGE_KEY)).toBeNull()
+  const openSettings = () =>
+    fireEvent.click(screen.getByRole('button', { name: 'Cookie settings' }))
+  openSettings()
+  expect(screen.getByRole('button', { name: 'Close' })).toBeTruthy()
   fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+  expect(localStorage.getItem(CONSENT_STORAGE_KEY)).toBeNull()
+  openSettings()
+  fireEvent.click(screen.getByRole('button', { name: 'Disable tracking' }))
+  expect(localStorage.getItem(CONSENT_STORAGE_KEY)).toBe('rejected')
+  expect(screen.queryByRole('region', { name: 'Cookie settings' })).toBeNull()
   expect(
     screen.getByRole('button', { name: 'Cookie settings' }).closest('.footer'),
   ).toBeTruthy()
-  expect(screen.queryByRole('region', { name: 'Cookie choices' })).toBeNull()
-  expect(document.querySelector('script')).toBeNull()
+  first.unmount()
+  render(page)
+  expect(screen.queryByRole('region', { name: 'Cookie settings' })).toBeNull()
+  openSettings()
+  expect(document.querySelector('aside p')?.textContent).toContain(
+    'currently disabled',
+  )
+  fireEvent.click(screen.getByRole('button', { name: 'Enable tracking' }))
+  expect(localStorage.getItem(CONSENT_STORAGE_KEY)).toBe('accepted')
+  expect(document.querySelectorAll('script[src*="gtm.js"]')).toHaveLength(1)
+})
+
+it('starts once for a first-time NZ visitor without a banner or saved acceptance, including StrictMode', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi
+      .fn()
+      .mockResolvedValue({ ok: true, json: async () => ({ country: 'NZ' }) }),
+  )
+  render(
+    <React.StrictMode>
+      <CookieConsent>
+        <Footer />
+      </CookieConsent>
+    </React.StrictMode>,
+  )
+  await waitFor(() =>
+    expect(document.querySelectorAll('script[src*="gtm.js"]')).toHaveLength(1),
+  )
+  expect(document.querySelectorAll('script[src*="fbevents.js"]')).toHaveLength(
+    1,
+  )
+  expect(screen.queryByRole('region', { name: 'Cookie settings' })).toBeNull()
+  expect(localStorage.getItem(CONSENT_STORAGE_KEY)).toBeNull()
+  expect(document.cookie).not.toContain(CONSENT_COOKIE)
+  fireEvent.click(screen.getByRole('button', { name: 'Cookie settings' }))
+  expect(document.querySelector('aside p')?.textContent).toContain(
+    'currently enabled',
+  )
 })
 
 it('includes no optional script or tracking image in HTML when JavaScript is disabled', () => {
@@ -95,20 +118,22 @@ it('gates booking attribution and booking conversion events on the same choice',
       <CookieConsent>
         <BookNowButton className="booking" />
         <BookingEmbedded />
+        <Footer />
       </CookieConsent>
     </React.StrictMode>,
   )
-  const link = screen.getByRole('link', {
+  const link = screen.getAllByRole('link', {
     name: 'Book Now',
-  }) as HTMLAnchorElement
+  })[0] as HTMLAnchorElement
   expect(link.href).not.toContain('gclid')
   window.dispatchEvent(
     new MessageEvent('message', { data: 'cliniko-bookings-page:confirmed' }),
   )
   expect(window.dataLayer).toBeUndefined()
-  fireEvent.click(screen.getByRole('button', { name: 'Accept' }))
-  expect(screen.queryByRole('region', { name: 'Cookie choices' })).toBeNull()
-  expect(screen.queryByRole('button', { name: /cookie settings/i })).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'Cookie settings' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Enable tracking' }))
+  expect(screen.queryByRole('region', { name: 'Cookie settings' })).toBeNull()
+  expect(screen.getByRole('button', { name: /cookie settings/i })).toBeTruthy()
   expect(link.href).toContain('gclid=saved-ad-click')
   expect(document.querySelectorAll('script[src*="gtm.js"]')).toHaveLength(1)
   expect(document.querySelectorAll('script[src*="fbevents.js"]')).toHaveLength(

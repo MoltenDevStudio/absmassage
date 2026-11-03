@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { CookieJar, JSDOM } from 'jsdom'
-import { CONSENT_COOKIE, OptionalTrackingController } from './optionalTracking'
+import {
+  CONSENT_COOKIE,
+  CONSENT_STORAGE_KEY,
+  detectNzVisitor,
+  hasOptionalTrackingConsent,
+  OptionalTrackingController,
+} from './optionalTracking'
 
 type Fixture = {
   dom: JSDOM
@@ -31,6 +37,7 @@ class FakeChannel {
 function tab(
   jar = new CookieJar(),
   url = 'https://www.andrewboltonsportsmassage.com/',
+  detectNz: (browser: Window) => Promise<boolean> = async () => false,
 ): Fixture {
   const dom = new JSDOM(
     '<!doctype html><html><head></head><body></body></html>',
@@ -43,7 +50,12 @@ function tab(
   })
   const changed = vi.fn()
   const reload = vi.fn()
-  const controller = new OptionalTrackingController(browser, changed, reload)
+  const controller = new OptionalTrackingController(
+    browser,
+    changed,
+    reload,
+    detectNz,
+  )
   const fixture = { dom, browser, changed, reload, controller }
   fixtures.push(fixture)
   return fixture
@@ -99,7 +111,7 @@ describe('optional tracking consent', () => {
     expect(fixture.browser.fbq).toBeUndefined()
     expect(fixture.browser.dataLayer).toBeUndefined()
     expect(fixture.browser.sessionStorage.getItem('gclid')).toBeNull()
-    expect(fixture.changed).toHaveBeenLastCalledWith(null)
+    expect(fixture.changed).toHaveBeenLastCalledWith(null, false)
   })
 
   it('persists rejection across visits without loading trackers', () => {
@@ -109,7 +121,7 @@ describe('optional tracking consent', () => {
     first.controller.choose('rejected')
     const next = tab(jar)
     next.controller.start()
-    expect(next.changed).toHaveBeenLastCalledWith('rejected')
+    expect(next.changed).toHaveBeenLastCalledWith('rejected', false)
     expect(scripts(first)).toEqual([])
     expect(scripts(next)).toEqual([])
     expect(next.browser.document.cookie).toContain(`${CONSENT_COOKIE}=rejected`)
@@ -259,6 +271,7 @@ describe('optional tracking consent', () => {
     const pixel = finishMeta(fixture)
     expect(pixel.mock.calls).toEqual([
       ['consent', 'grant'],
+      ['set', 'autoConfig', false, '2126552771609777'],
       ['init', '2126552771609777'],
       ['track', 'PageView'],
     ])
@@ -292,6 +305,7 @@ describe('optional tracking consent', () => {
     const pixel = finishMeta(fixture)
     expect(pixel.mock.calls).toEqual([
       ['consent', 'grant'],
+      ['set', 'autoConfig', false, '2126552771609777'],
       ['init', '2126552771609777'],
       ['track', 'PageView'],
     ])
@@ -376,12 +390,12 @@ describe('optional tracking consent', () => {
     first.controller.start()
     second.controller.start()
     first.controller.choose('accepted')
-    expect(second.changed).toHaveBeenLastCalledWith('accepted')
+    expect(second.changed).toHaveBeenLastCalledWith('accepted', true)
     expect(scripts(second)).toHaveLength(2)
     const firstPixel = finishMeta(first)
     const secondPixel = finishMeta(second)
     first.controller.choose('rejected')
-    expect(second.changed).toHaveBeenLastCalledWith('rejected')
+    expect(second.changed).toHaveBeenLastCalledWith('rejected', false)
     second.controller.navigate('/contact')
     expect(secondPixel).toHaveBeenLastCalledWith('consent', 'revoke')
     expect(
@@ -401,7 +415,7 @@ describe('optional tracking consent', () => {
     expect(pixel.mock.calls.filter((call) => call[0] === 'track')).toHaveLength(
       0,
     )
-    expect(fixture.changed).toHaveBeenLastCalledWith('rejected')
+    expect(fixture.changed).toHaveBeenLastCalledWith('rejected', false)
   })
 
   it('uses current cross-tab consent when Meta finishes loading', () => {
@@ -415,7 +429,7 @@ describe('optional tracking consent', () => {
     second.controller.navigate('/contact')
     first.controller.choose('rejected')
     const pixel = finishMeta(second)
-    expect(second.changed).toHaveBeenLastCalledWith('rejected')
+    expect(second.changed).toHaveBeenLastCalledWith('rejected', false)
     expect(
       pixel.mock.calls.filter(
         (call) => call[0] === 'init' || call[0] === 'track',
@@ -433,7 +447,7 @@ describe('optional tracking consent', () => {
       'https://www.andrewboltonsportsmassage.com/?gclid=new-click',
     )
     returning.controller.start()
-    expect(returning.changed).toHaveBeenLastCalledWith('accepted')
+    expect(returning.changed).toHaveBeenLastCalledWith('accepted', true)
     expect(scripts(returning)).toHaveLength(2)
     expect(returning.browser.sessionStorage.getItem('gclid')).toBe('new-click')
     returning.controller.choose('rejected')
@@ -453,10 +467,178 @@ describe('optional tracking consent', () => {
         key: 'optional-tracking-consent',
       }),
     )
-    expect(fixture.changed).toHaveBeenLastCalledWith('accepted')
+    expect(fixture.changed).toHaveBeenLastCalledWith('accepted', true)
     fixture.controller.choose('rejected')
     expect(
       fixture.browser.localStorage.getItem('optional-tracking-consent'),
     ).toBeTruthy()
   })
+})
+
+describe('regional defaults and preference migration', () => {
+  it('starts tracking for confirmed NZ without persisting acceptance, and does not duplicate scripts/events', async () => {
+    const detect = vi.fn(async () => true)
+    const fixture = tab(
+      undefined,
+      'https://www.andrewboltonsportsmassage.com/?gclid=nz-click',
+      detect,
+    )
+    fixture.controller.start()
+    expect(scripts(fixture)).toHaveLength(0)
+    await vi.waitFor(() => expect(scripts(fixture)).toHaveLength(2))
+    expect(fixture.changed).toHaveBeenLastCalledWith(null, true)
+    expect(fixture.browser.localStorage.getItem(CONSENT_STORAGE_KEY)).toBeNull()
+    expect(fixture.browser.document.cookie).not.toContain(CONSENT_COOKIE)
+    expect(fixture.browser.sessionStorage.getItem('gclid')).toBe('nz-click')
+    expect(hasOptionalTrackingConsent(fixture.browser)).toBe(true)
+    const pixel = finishMeta(fixture)
+    fixture.controller.navigate('/')
+    fixture.controller.stop()
+    fixture.controller.start()
+    expect(detect).toHaveBeenCalledOnce()
+    expect(scripts(fixture)).toHaveLength(2)
+    expect(pixel.mock.calls.filter((call) => call[0] === 'track')).toHaveLength(
+      1,
+    )
+    fixture.controller.choose('accepted')
+    expect(scripts(fixture)).toHaveLength(2)
+    expect(pixel.mock.calls.filter((call) => call[0] === 'track')).toHaveLength(
+      1,
+    )
+    fixture.controller.choose('rejected')
+    expect(fixture.browser.localStorage.getItem(CONSENT_STORAGE_KEY)).toBe(
+      'rejected',
+    )
+    expect(hasOptionalTrackingConsent(fixture.browser)).toBe(false)
+    expect(fixture.reload).toHaveBeenCalledOnce()
+  })
+
+  it.each(['DE', 'FR', 'IE', 'GB', 'CH', null, 'US', 'nz', 'NZ,DE'])(
+    'keeps %s disabled without affirmative consent',
+    async (country) => {
+      const fixture = tab(undefined, undefined, (browser) =>
+        detectNzVisitor(browser),
+      )
+      fixture.browser.fetch = vi
+        .fn()
+        .mockResolvedValue({ ok: true, json: async () => ({ country }) })
+      fixture.controller.start()
+      await vi.waitFor(() =>
+        expect(fixture.browser.fetch).toHaveBeenCalledOnce(),
+      )
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(scripts(fixture)).toHaveLength(0)
+      expect(hasOptionalTrackingConsent(fixture.browser)).toBe(false)
+      fixture.controller.choose('accepted')
+      expect(scripts(fixture)).toHaveLength(2)
+      expect(fixture.browser.localStorage.getItem(CONSENT_STORAGE_KEY)).toBe(
+        'accepted',
+      )
+    },
+  )
+
+  it.each(['accepted', 'rejected'] as const)(
+    'respects localStorage %s on reload without a cookie',
+    (choice) => {
+      const fixture = tab()
+      fixture.browser.localStorage.setItem(CONSENT_STORAGE_KEY, choice)
+      fixture.controller.start()
+      expect(scripts(fixture)).toHaveLength(choice === 'accepted' ? 2 : 0)
+      expect(fixture.changed).toHaveBeenLastCalledWith(
+        choice,
+        choice === 'accepted',
+      )
+    },
+  )
+
+  it.each(['accepted', 'rejected'] as const)(
+    'preserves legacy cookie %s for NZ visitors',
+    async (choice) => {
+      const fixture = tab(undefined, undefined, async () => true)
+      fixture.browser.document.cookie = `${CONSENT_COOKIE}=${choice}; Path=/`
+      fixture.controller.start()
+      await Promise.resolve()
+      expect(scripts(fixture)).toHaveLength(choice === 'accepted' ? 2 : 0)
+      expect(
+        fixture.browser.localStorage.getItem(CONSENT_STORAGE_KEY),
+      ).toBeNull()
+    },
+  )
+
+  it('honours rejection while a NZ lookup is pending', async () => {
+    let resolve!: (isNz: boolean) => void
+    const fixture = tab(
+      undefined,
+      undefined,
+      () =>
+        new Promise((done) => {
+          resolve = done
+        }),
+    )
+    fixture.controller.start()
+    fixture.controller.choose('rejected')
+    resolve(true)
+    await Promise.resolve()
+    expect(scripts(fixture)).toHaveLength(0)
+    expect(fixture.changed).toHaveBeenLastCalledWith('rejected', false)
+  })
+
+  it('gives a legacy rejection precedence over stored acceptance', () => {
+    const fixture = tab(undefined, undefined, async () => true)
+    fixture.browser.localStorage.setItem(CONSENT_STORAGE_KEY, 'accepted')
+    fixture.browser.document.cookie = `${CONSENT_COOKIE}=rejected; Path=/`
+    fixture.controller.start()
+    expect(scripts(fixture)).toHaveLength(0)
+  })
+
+  it('falls back to a legacy choice when localStorage is blocked', () => {
+    const fixture = tab()
+    Object.defineProperty(fixture.browser, 'localStorage', {
+      get() {
+        throw new Error('blocked')
+      },
+    })
+    fixture.controller.start()
+    fixture.controller.choose('accepted')
+    expect(scripts(fixture)).toHaveLength(2)
+    fixture.controller.choose('rejected')
+    expect(fixture.browser.document.cookie).toContain(
+      `${CONSENT_COOKIE}=rejected`,
+    )
+  })
+
+  it('uses localStorage storage events and rechecks opt-outs before booking events', async () => {
+    const fixture = tab(undefined, undefined, async () => true)
+    fixture.controller.start()
+    await Promise.resolve()
+    fixture.browser.document
+      .querySelector('script[src*="gtm.js"]')!
+      .dispatchEvent(new fixture.dom.window.Event('load'))
+    fixture.browser.localStorage.setItem(CONSENT_STORAGE_KEY, 'rejected')
+    fixture.controller.trackBookingCompleted()
+    expect(bookingEvents(fixture)).toHaveLength(0)
+    fixture.browser.dispatchEvent(
+      new fixture.dom.window.StorageEvent('storage', {
+        key: CONSENT_STORAGE_KEY,
+      }),
+    )
+    expect(fixture.reload).toHaveBeenCalledOnce()
+  })
+
+  it.each(['network', 'http', 'json'])(
+    'fails closed on a %s lookup failure',
+    async (failure) => {
+      const fixture = tab()
+      fixture.browser.fetch =
+        failure === 'network'
+          ? vi.fn().mockRejectedValue(new Error('offline'))
+          : vi.fn().mockResolvedValue({
+              ok: failure !== 'http',
+              json: async () => {
+                throw new Error('not JSON')
+              },
+            })
+      expect(await detectNzVisitor(fixture.browser)).toBe(false)
+    },
+  )
 })

@@ -25,12 +25,12 @@ interface Props {
 }
 
 export default function BookNowButton({ className, text }: Props) {
-  const { consent } = useOptionalTracking()
+  const { trackingEnabled } = useOptionalTracking()
   const [link, setLink] = useState(BOOKING_URL)
 
   useEffect(() => {
     setLink(bookingLink())
-  }, [consent])
+  }, [trackingEnabled])
 
   return (
     <a

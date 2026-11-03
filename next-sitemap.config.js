@@ -6,7 +6,7 @@ const nextSitemapConfig = {
   sitemapSize: 7000,
   changefreq: 'monthly',
   priority: 0.7,
-  exclude: ['/privacypolicy', '/refundcancellations'],
+  exclude: ['/privacypolicy', '/refundcancellations', '/api/*'],
   robotsTxtOptions: {
     policies: [
       {
