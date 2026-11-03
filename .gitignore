@@ -46,3 +46,4 @@ dev.sqlite3
 .next
 next-env.d.ts
 dist
+*.tsbuildinfo

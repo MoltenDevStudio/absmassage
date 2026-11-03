@@ -106,6 +106,46 @@ function bookingEvents(fixture: ReturnType<typeof tab>) {
   )
 }
 
+function blockPersistence(
+  fixture: Fixture,
+  local: 'getter' | 'read' | 'write' | 'silent',
+  cookie: 'silent' | 'throw' | 'read' = 'silent',
+) {
+  const storage = fixture.browser.localStorage
+  if (local === 'getter') {
+    Object.defineProperty(fixture.browser, 'localStorage', {
+      configurable: true,
+      get() {
+        throw new Error('storage blocked')
+      },
+    })
+  } else {
+    Object.defineProperty(fixture.browser, 'localStorage', {
+      configurable: true,
+      value: {
+        getItem: (key: string) => {
+          if (local === 'read') throw new Error('read blocked')
+          return storage.getItem(key)
+        },
+        setItem: () => {
+          if (local !== 'silent') throw new Error('write blocked')
+        },
+        removeItem: (key: string) => storage.removeItem(key),
+      },
+    })
+  }
+  Object.defineProperty(fixture.browser.document, 'cookie', {
+    configurable: true,
+    get() {
+      if (cookie === 'read') throw new Error('cookie read blocked')
+      return ''
+    },
+    set() {
+      if (cookie === 'throw') throw new Error('cookie write blocked')
+    },
+  })
+}
+
 afterEach(() => {
   for (const fixture of fixtures.splice(0)) {
     fixture.controller.stop()
@@ -672,6 +712,180 @@ describe('regional defaults and preference migration', () => {
       )
     },
   )
+})
+
+describe('unavailable consent persistence', () => {
+  it.each([
+    ['getter', 'silent'],
+    ['read', 'silent'],
+    ['write', 'silent'],
+    ['silent', 'silent'],
+    ['getter', 'throw'],
+    ['write', 'read'],
+  ] as const)(
+    'immediately withdraws NZ tracking despite %s localStorage and %s cookies',
+    async (local, cookie) => {
+      const fixture = tab(
+        undefined,
+        'https://www.andrewboltonsportsmassage.com/?gclid=ad-click',
+        async () => regionForCountry('NZ'),
+      )
+      fixture.controller.start()
+      await Promise.resolve()
+      expect(hasOptionalTrackingConsent(fixture.browser)).toBe(true)
+      const pixel = finishMeta(fixture)
+      const gtm = fixture.browser.document.querySelector(
+        'script[src*="gtm.js"]',
+      )!
+      fixture.controller.trackBookingCompleted()
+      blockPersistence(fixture, local, cookie)
+
+      expect(() => fixture.controller.choose('rejected')).not.toThrow()
+      expect(hasOptionalTrackingConsent(fixture.browser)).toBe(false)
+      expect(fixture.changed).toHaveBeenLastCalledWith('rejected', false, false)
+      expect(pixel).toHaveBeenLastCalledWith('consent', 'revoke')
+      expect(googleCalls(fixture).at(-1)?.[2].analytics_storage).toBe('denied')
+      expect(fixture.reload).toHaveBeenCalledOnce()
+      expect(fixture.browser.sessionStorage.getItem('gclid')).toBeNull()
+      expect(fixture.browser.location.search).toBe('')
+
+      gtm.dispatchEvent(new fixture.dom.window.Event('load'))
+      fixture.controller.navigate('/services')
+      fixture.controller.trackBookingCompleted()
+      for (const event of ['focus', 'pageshow', 'storage'])
+        fixture.browser.dispatchEvent(new fixture.dom.window.Event(event))
+      expect(bookingEvents(fixture)).toHaveLength(0)
+      expect(
+        pixel.mock.calls.filter((call) => call[0] === 'track'),
+      ).toHaveLength(1)
+      expect(hasOptionalTrackingConsent(fixture.browser)).toBe(false)
+
+      fixture.controller.stop()
+      fixture.controller = new OptionalTrackingController(
+        fixture.browser,
+        fixture.changed,
+        fixture.reload,
+        async () => regionForCountry('NZ'),
+      )
+      fixture.controller.start()
+      await Promise.resolve()
+      fixture.controller.navigate('/contact')
+      expect(fixture.changed).toHaveBeenLastCalledWith('rejected', false, false)
+      expect(hasOptionalTrackingConsent(fixture.browser)).toBe(false)
+
+      // A real reload loses the memory fallback. It must still fail closed
+      // while the same storage restrictions prevent recovering a decision.
+      const next = tab(undefined, undefined, async () => regionForCountry('NZ'))
+      blockPersistence(next, local, cookie)
+      next.controller.start()
+      await Promise.resolve()
+      expect(scripts(next)).toHaveLength(0)
+      expect(next.changed).toHaveBeenLastCalledWith(null, false, true)
+    },
+  )
+
+  it('retains both explicit choices in memory and allows a later deliberate change', async () => {
+    const fixture = tab(undefined, undefined, async () =>
+      regionForCountry('DE'),
+    )
+    blockPersistence(fixture, 'getter', 'throw')
+    fixture.controller.start()
+    await Promise.resolve()
+    fixture.controller.choose('accepted')
+    expect(hasOptionalTrackingConsent(fixture.browser)).toBe(true)
+    expect(fixture.changed).toHaveBeenLastCalledWith('accepted', true, false)
+    expect(scripts(fixture)).toHaveLength(2)
+    fixture.controller.choose('rejected')
+    expect(hasOptionalTrackingConsent(fixture.browser)).toBe(false)
+    fixture.controller.choose('accepted')
+    expect(hasOptionalTrackingConsent(fixture.browser)).toBe(true)
+  })
+
+  it.each(['local', 'cookie'])(
+    'does not use a stale acceptance or NZ default when the %s rejection cannot be read',
+    async (store) => {
+      const fixture = tab(undefined, undefined, async () =>
+        regionForCountry('NZ'),
+      )
+      if (store === 'local') {
+        fixture.browser.localStorage.setItem(CONSENT_STORAGE_KEY, 'rejected')
+        fixture.browser.document.cookie = `${CONSENT_COOKIE}=accepted; Path=/`
+        Object.defineProperty(fixture.browser, 'localStorage', {
+          get() {
+            throw new Error('read blocked')
+          },
+        })
+      } else {
+        fixture.browser.localStorage.setItem(CONSENT_STORAGE_KEY, 'accepted')
+        Object.defineProperty(fixture.browser.document, 'cookie', {
+          get() {
+            throw new Error('read blocked')
+          },
+        })
+      }
+      fixture.controller.start()
+      await Promise.resolve()
+      expect(hasOptionalTrackingConsent(fixture.browser)).toBe(false)
+      expect(scripts(fixture)).toHaveLength(0)
+      expect(fixture.changed).toHaveBeenLastCalledWith(null, false, true)
+    },
+  )
+
+  it('revokes an active grant if a saved decision becomes unreadable', async () => {
+    const fixture = tab(undefined, undefined, async () =>
+      regionForCountry('NZ'),
+    )
+    fixture.controller.start()
+    fixture.controller.choose('accepted')
+    const pixel = finishMeta(fixture)
+    blockPersistence(fixture, 'read')
+    fixture.controller.navigate('/about')
+    await Promise.resolve()
+    expect(hasOptionalTrackingConsent(fixture.browser)).toBe(false)
+    expect(pixel).toHaveBeenLastCalledWith('consent', 'revoke')
+    expect(fixture.reload).toHaveBeenCalledOnce()
+    expect(fixture.changed).toHaveBeenLastCalledWith(null, false, true)
+  })
+
+  it('broadcasts withdrawal even when the decision cannot be persisted', async () => {
+    const first = tab(undefined, undefined, async () => regionForCountry('NZ'))
+    const second = tab(undefined, undefined, async () => regionForCountry('NZ'))
+    first.controller.start()
+    second.controller.start()
+    await Promise.resolve()
+    blockPersistence(first, 'write')
+    first.controller.choose('rejected')
+    expect(hasOptionalTrackingConsent(second.browser)).toBe(false)
+    expect(second.changed).toHaveBeenLastCalledWith('rejected', false, false)
+    expect(second.reload).toHaveBeenCalledOnce()
+    second.controller.navigate('/services')
+    expect(hasOptionalTrackingConsent(second.browser)).toBe(false)
+  })
+
+  it('does not restore stale acceptance when failed reads recover after withdrawal', async () => {
+    const fixture = tab(undefined, undefined, async () =>
+      regionForCountry('NZ'),
+    )
+    const storage = fixture.browser.localStorage
+    storage.setItem(CONSENT_STORAGE_KEY, 'accepted')
+    fixture.controller.start()
+    await Promise.resolve()
+    blockPersistence(fixture, 'getter')
+    fixture.controller.choose('rejected')
+    Object.defineProperty(fixture.browser, 'localStorage', { value: storage })
+    fixture.browser.dispatchEvent(new fixture.dom.window.Event('focus'))
+    fixture.browser.dispatchEvent(
+      new fixture.dom.window.StorageEvent('storage', { key: null }),
+    )
+    fixture.browser.dispatchEvent(
+      new fixture.dom.window.StorageEvent('storage', {
+        key: 'optional-tracking-consent',
+      }),
+    )
+    fixture.controller.navigate('/contact')
+    expect(hasOptionalTrackingConsent(fixture.browser)).toBe(false)
+    expect(fixture.changed).toHaveBeenLastCalledWith('rejected', false, false)
+  })
 })
 
 describe('regional banner and consent records', () => {

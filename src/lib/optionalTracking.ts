@@ -2,6 +2,13 @@ export const CONSENT_COOKIE = 'optional_tracking_consent'
 // Reuse the legacy key; only explicit choices are persisted.
 export const CONSENT_STORAGE_KEY = CONSENT_COOKIE
 const visitorRegions = new WeakMap<Window, RegionInfo>()
+// Document scope survives controller remounts and client navigation, but never
+// carries an in-memory acceptance into a new document.
+const volatileDecisions = new WeakMap<
+  Document,
+  { choice: Exclude<ConsentChoice, null>; snapshot: string }
+>()
+const persistenceChecks = new WeakMap<Document, boolean>()
 
 export type RegionInfo = {
   country: string | null
@@ -123,11 +130,13 @@ function parseChoice(value: string | null): ConsentChoice {
 }
 
 function readConsent(browser: Window) {
+  let reliable = true
   let stored: string | null = null
   try {
     stored = browser.localStorage.getItem(CONSENT_STORAGE_KEY)
   } catch {
-    // The existing functional cookie remains a fallback for blocked storage.
+    // An unreadable store could contain an opt-out. Never treat it as empty.
+    reliable = false
   }
   let cookie: string | null = null
   try {
@@ -137,21 +146,76 @@ function readConsent(browser: Window) {
       ?.split('=')[1]
     cookie = encoded === undefined ? null : decodeURIComponent(encoded)
   } catch {
-    cookie = 'invalid'
+    reliable = false
   }
   const localChoice = parseChoice(stored)
   const cookieChoice = parseChoice(cookie)
-  const present = stored !== null || cookie !== null
+  const present = !reliable || stored !== null || cookie !== null
   // An explicit rejection wins. Invalid records never revive an accepted default
   // or bypass a new prompt through another store's stale acceptance.
   const choice: ConsentChoice =
     localChoice === 'rejected' || cookieChoice === 'rejected'
       ? 'rejected'
-      : (stored !== null && localChoice === null) ||
+      : !reliable ||
+          (stored !== null && localChoice === null) ||
           (cookie !== null && cookieChoice === null)
         ? null
         : localChoice || cookieChoice
-  return { choice, present }
+  return {
+    choice,
+    present,
+    reliable,
+    snapshot: JSON.stringify([reliable, stored, cookie]),
+  }
+}
+
+function effectiveConsent(browser: Window) {
+  const saved = readConsent(browser)
+  const memory = volatileDecisions.get(browser.document)
+  if (memory) {
+    // A newly observed opt-out also overrides a volatile acceptance. A
+    // rejection stays in memory until a deliberate choice replaces it;
+    // recovering a stale acceptance after a failed read must not revive tags.
+    if (saved.choice === 'rejected' && saved.snapshot !== memory.snapshot) {
+      volatileDecisions.set(browser.document, {
+        choice: 'rejected',
+        snapshot: saved.snapshot,
+      })
+      return { choice: 'rejected' as const, present: true }
+    }
+    return { choice: memory.choice, present: true }
+  }
+  return saved
+}
+
+function canRememberRejection(browser: Window) {
+  const cached = persistenceChecks.get(browser.document)
+  if (cached !== undefined) return cached
+  // If both stores silently discard writes, a reload would forget an opt-out.
+  // Require a verified functional storage round trip before using an NZ default.
+  const key = `${CONSENT_STORAGE_KEY}_check`
+  const value = `${Date.now()}-${Math.random()}`
+  let writable = false
+  try {
+    browser.localStorage.setItem(key, value)
+    writable = browser.localStorage.getItem(key) === value
+    browser.localStorage.removeItem(key)
+  } catch {
+    // Try the functional cookie when localStorage writes are unavailable.
+  }
+  if (!writable) {
+    try {
+      browser.document.cookie = `${key}=${value}; Path=/; SameSite=Lax`
+      writable = browser.document.cookie
+        .split('; ')
+        .some((cookie) => cookie === `${key}=${value}`)
+      browser.document.cookie = `${key}=; Max-Age=0; Path=/; SameSite=Lax`
+    } catch {
+      // Explicit choices still work in memory for this document.
+    }
+  }
+  persistenceChecks.set(browser.document, writable)
+  return writable
 }
 
 // Only a trusted server/edge response may return NZ; static exports return null.
@@ -177,17 +241,19 @@ export async function detectVisitorRegion(
   }
 }
 
-// Booking attribution and late events recheck the durable choice too.
+// Every integration uses the same effective decision, including memory fallback.
 export function hasOptionalTrackingConsent(
   browser: Window | undefined = typeof window === 'undefined'
     ? undefined
     : window,
 ) {
   if (!browser) return false
-  const { choice, present } = readConsent(browser)
+  const { choice, present } = effectiveConsent(browser)
   return (
     choice === 'accepted' ||
-    (!present && visitorRegions.get(browser)?.region === 'NZ')
+    (!present &&
+      visitorRegions.get(browser)?.region === 'NZ' &&
+      canRememberRejection(browser))
   )
 }
 
@@ -198,7 +264,13 @@ function clearTrackingCookies(browser: Window) {
     domains.add(SITE_DOMAIN)
   }
   const names = new Set(['_fbp', '_fbc'])
-  for (const cookie of browser.document.cookie.split('; ')) {
+  let cookies = ''
+  try {
+    cookies = browser.document.cookie
+  } catch {
+    // Cookie cleanup must never prevent consent revocation.
+  }
+  for (const cookie of cookies.split('; ')) {
     const name = cookie.split('=')[0]
     // Only clear present GA/Ads measurement cookies, never unrelated cookies.
     // The repository contains a GTM ID, but no exported container/tag inventory.
@@ -206,9 +278,17 @@ function clearTrackingCookies(browser: Window) {
   }
   for (const name of names) {
     const expiry = `${name}=; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/`
-    browser.document.cookie = expiry
+    try {
+      browser.document.cookie = expiry
+    } catch {
+      // Cookies may be blocked independently of localStorage.
+    }
     for (const domain of domains) {
-      browser.document.cookie = `${expiry}; Domain=${domain}`
+      try {
+        browser.document.cookie = `${expiry}; Domain=${domain}`
+      } catch {
+        // Continue revocation even if a cookie write is rejected.
+      }
     }
   }
 }
@@ -224,6 +304,7 @@ export class OptionalTrackingController {
   private pathname = ''
   private channel: BroadcastChannel | null = null
   private googleStarted = false
+  private reloadRequested = false
   private googleReady = false
   private pendingBookingCompleted = false
   private metaScript: HTMLScriptElement | null = null
@@ -304,24 +385,42 @@ export class OptionalTrackingController {
     }
     const value = JSON.stringify(record)
     const secure = this.browser.location.protocol === 'https:' ? '; Secure' : ''
-    this.browser.document.cookie = `${CONSENT_COOKIE}=${encodeURIComponent(value)}; Max-Age=31536000; Path=/; SameSite=Lax${secure}`
+    try {
+      this.browser.document.cookie = `${CONSENT_COOKIE}=${encodeURIComponent(value)}; Max-Age=31536000; Path=/; SameSite=Lax${secure}`
+    } catch {
+      // Some browsers throw; others silently ignore blocked cookie writes.
+    }
     try {
       this.browser.localStorage.setItem(CONSENT_STORAGE_KEY, value)
     } catch {
       // Keep the existing cookie as a fallback for unavailable localStorage.
     }
-    if (this.channel) this.channel.postMessage('changed')
-    else {
+    const saved = readConsent(this.browser)
+    if (saved.reliable && saved.choice === choice) {
+      volatileDecisions.delete(this.browser.document)
+    } else {
+      volatileDecisions.set(this.browser.document, {
+        choice,
+        snapshot: saved.snapshot,
+      })
+    }
+    // Revoke locally before notifying other tabs, even if notification fails.
+    this.synchronize()
+    try {
+      this.channel?.postMessage({ type: 'changed', choice })
+    } catch {
+      // A closed/unavailable channel cannot undo the current decision.
+    }
+    if (!this.channel) {
       try {
         this.browser.localStorage.setItem(
           SYNC_CHANNEL,
           `${Date.now()}:${Math.random()}`,
         )
       } catch {
-        // The cookie is durable even when cross-tab storage is unavailable.
+        // The current document still retains the explicit choice in memory.
       }
     }
-    this.synchronize()
   }
 
   navigate(pathname: string) {
@@ -341,7 +440,19 @@ export class OptionalTrackingController {
   }
 
   private onMessage = (event: MessageEvent) => {
-    if (event.data === 'changed') this.synchronize()
+    if (event.data?.type === 'changed' && event.data.choice === 'rejected') {
+      volatileDecisions.set(this.browser.document, {
+        choice: 'rejected',
+        snapshot: readConsent(this.browser).snapshot,
+      })
+    }
+    if (event.data?.type === 'changed' && event.data.choice === 'accepted') {
+      const saved = readConsent(this.browser)
+      if (saved.reliable && saved.choice === 'accepted')
+        volatileDecisions.delete(this.browser.document)
+    }
+    if (event.data === 'changed' || event.data?.type === 'changed')
+      this.synchronize()
   }
 
   private onStorage = (event: StorageEvent) => {
@@ -349,12 +460,23 @@ export class OptionalTrackingController {
       event.key === SYNC_CHANNEL ||
       event.key === CONSENT_STORAGE_KEY ||
       event.key === null
-    )
+    ) {
+      const saved = readConsent(this.browser)
+      const memory = volatileDecisions.get(this.browser.document)
+      if (
+        event.key === CONSENT_STORAGE_KEY &&
+        parseChoice(event.newValue) === 'accepted' &&
+        saved.reliable &&
+        saved.choice === 'accepted' &&
+        saved.snapshot !== memory?.snapshot
+      )
+        volatileDecisions.delete(this.browser.document)
       this.synchronize()
+    }
   }
 
   private synchronize = () => {
-    if (this.running) this.apply(readConsent(this.browser).choice)
+    if (this.running) this.apply(effectiveConsent(this.browser).choice)
   }
 
   private allowed() {
@@ -367,8 +489,7 @@ export class OptionalTrackingController {
 
   private apply(choice: ConsentChoice) {
     const enabled = hasOptionalTrackingConsent(this.browser)
-    const requiresConsent =
-      this.regionResolved && this.region.region !== 'NZ' && choice === null
+    const requiresConsent = this.regionResolved && choice === null && !enabled
     if (
       this.choice === choice &&
       this.enabled === enabled &&
@@ -405,7 +526,10 @@ export class OptionalTrackingController {
         // removes already-loaded GTM listeners/timers and never loads it again
         // while the persisted choice is rejected (including in other tabs).
         this.onChoice(choice, enabled, requiresConsent)
-        this.reload()
+        if (!this.reloadRequested) {
+          this.reloadRequested = true
+          this.reload()
+        }
         return
       }
     }

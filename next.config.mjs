@@ -5,8 +5,9 @@ const nextConfig = {
   },
   // Keep static exports for existing static hosts; Vercel needs a runtime
   // for the trusted, per-request country lookup. Pages remain prerendered.
-  ...(process.env.VERCEL === '1' ? {} : { output: 'export' }),
-  distDir: './dist', // Changes the build output directory to `./dist/`.
+  ...(process.env.VERCEL === '1'
+    ? {}
+    : { output: 'export', distDir: './dist' }),
 }
 
 export default nextConfig
