@@ -107,11 +107,21 @@ function privacypolicy() {
           Optional analytics and advertising tracking
         </h2>
         <p>
-          When you accept optional tracking, we may use Google analytics and
-          advertising technologies loaded through Google Tag Manager, and the
-          Meta Pixel. These help us understand website use and measure our
-          marketing. Google Tag Manager is the tool that loads tracking tags. It
-          and the Meta Pixel are disabled unless you accept.
+          For visitors identified as being in New Zealand, website analytics and
+          advertising measurement are enabled automatically unless you have
+          opted out. This includes Google Analytics 4 and Google Ads tags
+          configured through Google Tag Manager, and the Meta Pixel. These tools
+          help us understand website use and measure our marketing. An automatic
+          default is not recorded as your explicit consent.
+        </p>
+        <p>
+          For visitors in the EEA, UK or Switzerland, and whenever we cannot
+          reliably identify a visitor as being in New Zealand, non-essential
+          tracking stays disabled until you explicitly accept. If no valid
+          preference is saved, we show a cookie banner with equally accessible
+          Accept all and Reject all options. The same consent requirement
+          applies to other visitors outside New Zealand and when location is
+          unknown. Cookie settings remains available in the footer for everyone.
         </p>
         <p>
           Google and Meta may receive information about visits, pages viewed,
@@ -137,21 +147,30 @@ function privacypolicy() {
           .
         </p>
         <p>
-          You can reject optional tracking or withdraw consent later using
-          Cookie settings in the footer. Withdrawal clears supported advertising
-          and measurement cookies and may refresh the page to stop tracking tags
-          that have already loaded. A first-party functional cookie remembers
-          your choice for up to a year, including when you reject optional
-          tracking. Other open tabs on this website receive updates to your
-          choice.
+          You can disable or re-enable analytics and advertising tracking at any
+          time using Cookie settings in the footer. Disabling tracking clears
+          supported measurement cookies and refreshes the page if tags have
+          already loaded, to stop further tracking. Your explicit choice is
+          stored in localStorage until you change it or clear your browser
+          storage, with a first-party functional cookie lasting up to a year as
+          a fallback. New decisions include your analytics and advertising
+          choices, the country/region identified when you chose (or unknown),
+          and a timestamp. We retain existing explicit choices without inventing
+          historical consent dates. Existing opt-outs remain respected. Other
+          open tabs on this website receive updates to your choice.
         </p>
         <p>
-          With consent, we also retain Google ad click identifiers for booking
-          attribution and may include them in links to our Cliniko booking
-          service. They are cleared when you withdraw consent. Separately,
-          Vercel Web Analytics and Speed Insights provide cookieless website
-          statistics and performance measurements; they are not used for
-          advertising profiles and remain outside this optional tracking choice.
+          When tracking is enabled, we retain Google ad click identifiers for
+          booking attribution and may include them in links to our Cliniko
+          booking service. They are cleared when you disable tracking. Vercel
+          Web Analytics and Speed Insights provide cookieless website statistics
+          and performance measurements and follow the same settings.
+        </p>
+        <p>
+          We do not send treatment details, health information, names, email
+          addresses, phone numbers or booking form contents to advertising
+          platforms through website tracking. The website passes only a generic
+          booking-completed event for measurement, without booking details.
         </p>
         <h2 className="p-heading mt-2">How this information is used</h2>
         <p>

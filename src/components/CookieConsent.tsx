@@ -9,19 +9,24 @@ import {
   useState,
 } from 'react'
 import { usePathname } from 'next/navigation'
+import { Analytics } from '@vercel/analytics/react'
+import { SpeedInsights } from '@vercel/speed-insights/next'
 import {
   OptionalTrackingController,
+  hasOptionalTrackingConsent,
   type ConsentChoice,
 } from '../lib/optionalTracking'
 
 type OptionalTrackingContextValue = {
   consent: ConsentChoice
+  trackingEnabled: boolean
   openCookieSettings: () => void
   trackBookingCompleted: () => void
 }
 
 const OptionalTrackingContext = createContext<OptionalTrackingContextValue>({
   consent: null,
+  trackingEnabled: false,
   openCookieSettings: () => {},
   trackBookingCompleted: () => {},
 })
@@ -37,15 +42,23 @@ export default function CookieConsent({
 }) {
   const pathname = usePathname()
   const [consent, setConsent] = useState<ConsentChoice>(null)
-  const [consentLoaded, setConsentLoaded] = useState(false)
+  const [trackingEnabled, setTrackingEnabled] = useState(false)
+  const [requiresConsent, setRequiresConsent] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [saveFailed, setSaveFailed] = useState(false)
   const controller = useRef<OptionalTrackingController | null>(null)
 
   useEffect(() => {
-    controller.current ??= new OptionalTrackingController(window, setConsent)
+    controller.current ??= new OptionalTrackingController(
+      window,
+      (choice, enabled, prompt) => {
+        setRequiresConsent(prompt)
+        setConsent(choice)
+        setTrackingEnabled(enabled)
+      },
+    )
     const tracking = controller.current
     tracking.start()
-    setConsentLoaded(true)
     return () => tracking.stop()
   }, [])
 
@@ -54,8 +67,9 @@ export default function CookieConsent({
   }, [pathname])
 
   function chooseConsent(choice: Exclude<ConsentChoice, null>) {
-    controller.current?.choose(choice)
-    setSettingsOpen(false)
+    const saved = controller.current?.choose(choice) === true
+    setSaveFailed(!saved)
+    setSettingsOpen(!saved)
   }
 
   const trackBookingCompleted = useCallback(
@@ -63,18 +77,31 @@ export default function CookieConsent({
     [],
   )
 
-  const showChoices = consent === null || settingsOpen
-
   return (
     <OptionalTrackingContext.Provider
       value={{
         consent,
+        trackingEnabled,
         openCookieSettings: () => setSettingsOpen(true),
         trackBookingCompleted,
       }}
     >
       {children}
-      {consentLoaded && showChoices && (
+      {trackingEnabled && (
+        <>
+          <Analytics
+            beforeSend={(event) =>
+              hasOptionalTrackingConsent() ? event : null
+            }
+          />
+          <SpeedInsights
+            beforeSend={(event) =>
+              hasOptionalTrackingConsent() ? event : null
+            }
+          />
+        </>
+      )}
+      {(settingsOpen || requiresConsent) && (
         <aside
           aria-labelledby="cookie-consent-heading"
           className="fixed inset-x-0 bottom-0 z-[100] border-t border-gray-200 bg-white px-4 py-2 text-left text-gray-900 shadow-2xl sm:px-6"
@@ -82,36 +109,46 @@ export default function CookieConsent({
         >
           <div className="mx-auto max-w-6xl">
             <h2 id="cookie-consent-heading" className="sr-only">
-              Cookie choices
+              Cookie settings
             </h2>
             <p className="my-0 max-w-3xl text-sm leading-relaxed">
-              I use cookies &amp; similar tech to understand site use &amp; help
-              with marketing. See my{' '}
+              I use analytics and advertising cookies to understand website use
+              and measure marketing. Your optional tracking preference is
+              currently {trackingEnabled ? 'enabled' : 'disabled'}. You can
+              accept or reject both below. See my{' '}
               <a className="underline" href="/privacypolicy">
                 Privacy Policy
               </a>
               .
             </p>
-            <div className="relative mt-1 flex min-h-10 justify-center">
-              <div className="flex gap-2">
+            {saveFailed && (
+              <p role="status" className="my-2 max-w-3xl text-sm">
+                Your choice applies on this page, but could not be saved. Please
+                allow preference storage and try again before reloading or
+                leaving this page. Previously loaded services may still send
+                requests.
+              </p>
+            )}
+            <div className="mt-1 flex min-h-10 flex-wrap items-center justify-center gap-2">
+              <div className="flex flex-wrap justify-center gap-2">
                 <button
                   className="min-h-10 rounded-lg border border-gray-400 px-4 py-1.5 text-sm font-semibold hover:bg-gray-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
                   onClick={() => chooseConsent('rejected')}
                   type="button"
                 >
-                  Reject
+                  Reject all
                 </button>
                 <button
-                  className="min-h-10 rounded-lg bg-[#1f4c3c] px-4 py-1.5 text-sm font-semibold text-white hover:bg-[#17392d] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+                  className="min-h-10 rounded-lg border border-gray-400 px-4 py-1.5 text-sm font-semibold hover:bg-gray-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
                   onClick={() => chooseConsent('accepted')}
                   type="button"
                 >
-                  Accept
+                  Accept all
                 </button>
               </div>
-              {consent !== null && (
+              {!requiresConsent && (
                 <button
-                  className="absolute right-0 top-1/2 -translate-y-1/2 rounded px-3 py-2 text-sm underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+                  className="rounded px-3 py-2 text-sm underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
                   onClick={() => setSettingsOpen(false)}
                   type="button"
                 >
