@@ -396,7 +396,8 @@ export class OptionalTrackingController {
       // Keep the existing cookie as a fallback for unavailable localStorage.
     }
     const saved = readConsent(this.browser)
-    if (saved.reliable && saved.choice === choice) {
+    const persisted = saved.reliable && saved.choice === choice
+    if (persisted) {
       volatileDecisions.delete(this.browser.document)
     } else {
       volatileDecisions.set(this.browser.document, {
@@ -421,6 +422,7 @@ export class OptionalTrackingController {
         // The current document still retains the explicit choice in memory.
       }
     }
+    return persisted
   }
 
   navigate(pathname: string) {
@@ -476,7 +478,18 @@ export class OptionalTrackingController {
   }
 
   private synchronize = () => {
-    if (this.running) this.apply(effectiveConsent(this.browser).choice)
+    if (!this.running) return
+    this.apply(effectiveConsent(this.browser).choice)
+    // Replacing the document discards volatileDecisions. Only do so after
+    // verifying a durable rejection, or stale acceptance could revive tracking.
+    // Recheck even if apply did not change state, so a successful retry reloads.
+    if (this.googleStarted && !this.enabled && !this.reloadRequested) {
+      const saved = readConsent(this.browser)
+      if (saved.reliable && saved.choice === 'rejected') {
+        this.reloadRequested = true
+        this.reload()
+      }
+    }
   }
 
   private allowed() {
@@ -522,15 +535,8 @@ export class OptionalTrackingController {
       }
       if (this.googleStarted) {
         this.googleConsent('update', 'denied')
-        // Consent Mode alone can still send cookieless pings. A fresh document
-        // removes already-loaded GTM listeners/timers and never loads it again
-        // while the persisted choice is rejected (including in other tabs).
-        this.onChoice(choice, enabled, requiresConsent)
-        if (!this.reloadRequested) {
-          this.reloadRequested = true
-          this.reload()
-        }
-        return
+        // Loaded tags may still send cookieless pings. synchronize reloads to
+        // remove them only when a saved rejection makes replacement safe.
       }
     }
     this.onChoice(choice, enabled, requiresConsent)

@@ -78,6 +78,54 @@ it('keeps footer settings available and remembers explicit choices', () => {
   expect(document.querySelectorAll('script[src*="gtm.js"]')).toHaveLength(1)
 })
 
+it('shows a save failure and lets the visitor retry while retaining rejection', async () => {
+  localStorage.setItem(CONSENT_STORAGE_KEY, 'accepted')
+  const page = render(
+    <CookieConsent>
+      <Footer />
+    </CookieConsent>,
+  )
+  const cookie = vi
+    .spyOn(document, 'cookie', 'set')
+    .mockImplementation(() => {})
+  const write = vi
+    .spyOn(Storage.prototype, 'setItem')
+    .mockImplementation(() => {
+      throw new Error('quota exceeded')
+    })
+  try {
+    fireEvent.click(screen.getByRole('button', { name: 'Cookie settings' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Reject all' }))
+    expect(screen.getByRole('status').textContent).toContain(
+      'could not be saved',
+    )
+    expect(screen.getByRole('status').textContent).toContain(
+      'Previously loaded services may still send requests',
+    )
+    expect(document.querySelector('aside p')?.textContent).toContain(
+      'currently disabled',
+    )
+    expect(localStorage.getItem(CONSENT_STORAGE_KEY)).toBe('accepted')
+    page.rerender(
+      <CookieConsent>
+        <Footer />
+      </CookieConsent>,
+    )
+    expect(screen.getByRole('status')).toBeTruthy()
+    write.mockRestore()
+    cookie.mockRestore()
+    fireEvent.click(screen.getByRole('button', { name: 'Accept all' }))
+    expect(screen.queryByRole('status')).toBeNull()
+    expect(screen.queryByRole('region', { name: 'Cookie settings' })).toBeNull()
+    expect(
+      JSON.parse(localStorage.getItem(CONSENT_STORAGE_KEY)!).choices.analytics,
+    ).toBe(true)
+  } finally {
+    cookie.mockRestore()
+    write.mockRestore()
+  }
+})
+
 it('starts once for a first-time NZ visitor without a banner or saved acceptance, including StrictMode', async () => {
   vi.stubGlobal(
     'fetch',

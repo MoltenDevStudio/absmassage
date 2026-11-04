@@ -43,7 +43,7 @@ afterEach(() => {
 })
 
 it('withdraws all integrations and booking attribution when storage stops working', async () => {
-  // jsdom reports reloads as unimplemented; controller tests inject a reload spy.
+  // A failed save must not attempt a document reload.
   const reloadError = vi.spyOn(console, 'error').mockImplementation(() => {})
   Element.prototype.scrollIntoView = vi.fn()
   vi.stubGlobal('BroadcastChannel', undefined)
@@ -107,8 +107,6 @@ it('withdraws all integrations and booking attribution when storage stops workin
   expect(document.querySelector('aside p')?.textContent).toContain(
     'currently disabled',
   )
-  expect(reloadError).toHaveBeenCalledOnce()
-  expect(reloadError.mock.calls[0][0]).toContain(
-    'Not implemented: navigation (except hash changes)',
-  )
+  expect(reloadError).not.toHaveBeenCalled()
+  expect(screen.getByRole('status').textContent).toContain('could not be saved')
 })

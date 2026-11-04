@@ -716,6 +716,109 @@ describe('regional defaults and preference migration', () => {
 
 describe('unavailable consent persistence', () => {
   it.each([
+    ['write', 'silent'],
+    ['silent', 'silent'],
+    ['write', 'throw'],
+  ] as const)(
+    'keeps stale acceptance suppressed without reloading when writes are %s and cookies are %s',
+    async (local, cookie) => {
+      const fixture = tab(undefined, undefined, async () =>
+        regionForCountry('NZ'),
+      )
+      const storage = fixture.browser.localStorage
+      storage.setItem(CONSENT_STORAGE_KEY, 'accepted')
+      blockPersistence(fixture, local, cookie)
+      fixture.controller.start()
+      await Promise.resolve()
+      const pixel = finishMeta(fixture)
+      const gtm = fixture.browser.document.querySelector(
+        'script[src*="gtm.js"]',
+      )!
+      gtm.dispatchEvent(new fixture.dom.window.Event('load'))
+      fixture.controller.trackBookingCompleted()
+      expect(bookingEvents(fixture)).toHaveLength(1)
+
+      expect(fixture.controller.choose('rejected')).toBe(false)
+      expect(storage.getItem(CONSENT_STORAGE_KEY)).toBe('accepted')
+      expect(fixture.reload).not.toHaveBeenCalled()
+      expect(pixel).toHaveBeenLastCalledWith('consent', 'revoke')
+      expect(googleCalls(fixture).at(-1)?.[2].analytics_storage).toBe('denied')
+
+      fixture.controller.navigate('/services')
+      fixture.controller.trackBookingCompleted()
+      for (const event of ['focus', 'pageshow'])
+        fixture.browser.dispatchEvent(new fixture.dom.window.Event(event))
+      fixture.controller.stop()
+      fixture.controller = new OptionalTrackingController(
+        fixture.browser,
+        fixture.changed,
+        fixture.reload,
+        async () => regionForCountry('NZ'),
+      )
+      fixture.controller.start()
+      await Promise.resolve()
+      fixture.controller.navigate('/contact')
+      fixture.controller.trackBookingCompleted()
+      expect(hasOptionalTrackingConsent(fixture.browser)).toBe(false)
+      expect(bookingEvents(fixture)).toHaveLength(1)
+      expect(
+        pixel.mock.calls.filter((call) => call[0] === 'track'),
+      ).toHaveLength(1)
+      expect(scripts(fixture)).toHaveLength(2)
+      expect(fixture.reload).not.toHaveBeenCalled()
+    },
+  )
+
+  it.each(['local', 'cookie'])(
+    'reloads once after rejection is verified in the %s fallback, then stays rejected on navigation',
+    (store) => {
+      const jar = new CookieJar()
+      const fixture = tab(jar)
+      const storage = fixture.browser.localStorage
+      storage.setItem(CONSENT_STORAGE_KEY, 'accepted')
+      fixture.controller.start()
+      if (store === 'local') blockPersistence(fixture, 'write')
+      if (store === 'cookie')
+        Object.defineProperty(fixture.browser, 'localStorage', {
+          value: {
+            getItem: (key: string) => storage.getItem(key),
+            setItem: () => {
+              throw new Error('quota')
+            },
+          },
+        })
+      if (store === 'local')
+        Object.defineProperty(fixture.browser, 'localStorage', {
+          value: storage,
+        })
+      expect(fixture.controller.choose('rejected')).toBe(true)
+      expect(fixture.reload).toHaveBeenCalledOnce()
+      fixture.controller.navigate('/services')
+      expect(fixture.reload).toHaveBeenCalledOnce()
+      const next = tab(jar)
+      const saved = storage.getItem(CONSENT_STORAGE_KEY)
+      if (saved) next.browser.localStorage.setItem(CONSENT_STORAGE_KEY, saved)
+      next.controller.start()
+      next.controller.navigate('/contact')
+      expect(hasOptionalTrackingConsent(next.browser)).toBe(false)
+      expect(scripts(next)).toHaveLength(0)
+    },
+  )
+
+  it('reloads after a successful retry even though the in-memory rejection is unchanged', () => {
+    const fixture = tab()
+    const storage = fixture.browser.localStorage
+    storage.setItem(CONSENT_STORAGE_KEY, 'accepted')
+    fixture.controller.start()
+    blockPersistence(fixture, 'write')
+    expect(fixture.controller.choose('rejected')).toBe(false)
+    expect(fixture.reload).not.toHaveBeenCalled()
+    Object.defineProperty(fixture.browser, 'localStorage', { value: storage })
+    expect(fixture.controller.choose('rejected')).toBe(true)
+    expect(fixture.reload).toHaveBeenCalledOnce()
+  })
+
+  it.each([
     ['getter', 'silent'],
     ['read', 'silent'],
     ['write', 'silent'],
@@ -745,7 +848,7 @@ describe('unavailable consent persistence', () => {
       expect(fixture.changed).toHaveBeenLastCalledWith('rejected', false, false)
       expect(pixel).toHaveBeenLastCalledWith('consent', 'revoke')
       expect(googleCalls(fixture).at(-1)?.[2].analytics_storage).toBe('denied')
-      expect(fixture.reload).toHaveBeenCalledOnce()
+      expect(fixture.reload).not.toHaveBeenCalled()
       expect(fixture.browser.sessionStorage.getItem('gclid')).toBeNull()
       expect(fixture.browser.location.search).toBe('')
 
@@ -843,7 +946,7 @@ describe('unavailable consent persistence', () => {
     await Promise.resolve()
     expect(hasOptionalTrackingConsent(fixture.browser)).toBe(false)
     expect(pixel).toHaveBeenLastCalledWith('consent', 'revoke')
-    expect(fixture.reload).toHaveBeenCalledOnce()
+    expect(fixture.reload).not.toHaveBeenCalled()
     expect(fixture.changed).toHaveBeenLastCalledWith(null, false, true)
   })
 
@@ -857,7 +960,7 @@ describe('unavailable consent persistence', () => {
     first.controller.choose('rejected')
     expect(hasOptionalTrackingConsent(second.browser)).toBe(false)
     expect(second.changed).toHaveBeenLastCalledWith('rejected', false, false)
-    expect(second.reload).toHaveBeenCalledOnce()
+    expect(second.reload).not.toHaveBeenCalled()
     second.controller.navigate('/services')
     expect(hasOptionalTrackingConsent(second.browser)).toBe(false)
   })

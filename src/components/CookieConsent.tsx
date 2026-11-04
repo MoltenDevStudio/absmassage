@@ -45,6 +45,7 @@ export default function CookieConsent({
   const [trackingEnabled, setTrackingEnabled] = useState(false)
   const [requiresConsent, setRequiresConsent] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [saveFailed, setSaveFailed] = useState(false)
   const controller = useRef<OptionalTrackingController | null>(null)
 
   useEffect(() => {
@@ -66,8 +67,9 @@ export default function CookieConsent({
   }, [pathname])
 
   function chooseConsent(choice: Exclude<ConsentChoice, null>) {
-    controller.current?.choose(choice)
-    setSettingsOpen(false)
+    const saved = controller.current?.choose(choice) === true
+    setSaveFailed(!saved)
+    setSettingsOpen(!saved)
   }
 
   const trackBookingCompleted = useCallback(
@@ -111,14 +113,22 @@ export default function CookieConsent({
             </h2>
             <p className="my-0 max-w-3xl text-sm leading-relaxed">
               I use analytics and advertising cookies to understand website use
-              and measure marketing. Tracking is currently{' '}
-              {trackingEnabled ? 'enabled' : 'disabled'}. You can accept or
-              reject both below. See my{' '}
+              and measure marketing. Your optional tracking preference is
+              currently {trackingEnabled ? 'enabled' : 'disabled'}. You can
+              accept or reject both below. See my{' '}
               <a className="underline" href="/privacypolicy">
                 Privacy Policy
               </a>
               .
             </p>
+            {saveFailed && (
+              <p role="status" className="my-2 max-w-3xl text-sm">
+                Your choice applies on this page, but could not be saved. Please
+                allow preference storage and try again before reloading or
+                leaving this page. Previously loaded services may still send
+                requests.
+              </p>
+            )}
             <div className="mt-1 flex min-h-10 flex-wrap items-center justify-center gap-2">
               <div className="flex flex-wrap justify-center gap-2">
                 <button
