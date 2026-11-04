@@ -10,13 +10,45 @@
 }
 
 .gift-vouchers-page {
-  padding-top: 0.5rem;
+  padding-top: 1rem;
 }
 
-.gift-vouchers-page > p {
+.gift-vouchers-intro {
   max-width: 42rem;
-  margin: 1rem auto 0;
+  margin: 0 auto;
   text-wrap: pretty;
+}
+
+.gift-vouchers-description,
+.gift-vouchers-faq {
+  max-width: 48rem;
+  margin: 3rem auto 0;
+  text-wrap: pretty;
+}
+
+.gift-vouchers-description h2,
+.gift-vouchers-faq h2 {
+  margin: 0 0 1rem;
+}
+
+.gift-vouchers-description p {
+  margin: 0 0 1rem;
+}
+
+.gift-vouchers-faq dl {
+  margin: 0;
+}
+
+.gift-vouchers-faq dl > div + div {
+  margin-top: 1.25rem;
+}
+
+.gift-vouchers-faq dt {
+  font-weight: 600;
+}
+
+.gift-vouchers-faq dd {
+  margin: 0.35rem 0 0;
 }
 
 .gift-vouchers-link {
@@ -31,7 +63,7 @@
 }
 
 .gift-up-widget {
-  margin: 2rem auto;
+  margin: 1rem auto 2rem;
   min-width: 0;
   text-align: left;
 }

@@ -6,15 +6,14 @@ import GiftVouchersPage, { metadata } from './page'
 
 afterEach(cleanup)
 
-it('shows a practical introduction immediately before the existing checkout', () => {
+it('shows the requested introduction, checkout, description, and FAQs', () => {
   render(<GiftVouchersPage />)
 
-  expect(screen.getAllByRole('heading')).toHaveLength(1)
   expect(screen.getByRole('heading', { level: 1 }).textContent).toBe(
     'Gift Vouchers',
   )
   const intro = screen.getByText(
-    'Choose a gift voucher value below. Vouchers can be emailed or printed at home.',
+    'Buy a massage gift voucher below, then send it by email or print it at home.',
   )
   expect(intro.nextElementSibling?.getAttribute('aria-label')).toBe(
     'Buy a gift voucher',
@@ -27,6 +26,27 @@ it('shows a practical introduction immediately before the existing checkout', ()
       .getByRole('link', { name: /Contact me about gift vouchers/ })
       .getAttribute('href'),
   ).toBe('mailto:andrew@andrewboltonsportsmassage.com')
+
+  expect(
+    screen.getByRole('heading', {
+      level: 2,
+      name: 'Massage gift vouchers in Christchurch',
+    }),
+  ).toBeTruthy()
+  expect(
+    screen.getByRole('heading', {
+      level: 2,
+      name: 'Frequently asked questions',
+    }),
+  ).toBeTruthy()
+  expect(
+    screen.getByText(
+      'Gift vouchers are valid for three years from the date of purchase.',
+    ),
+  ).toBeTruthy()
+  expect(
+    screen.getByText('Yes. Vouchers can be emailed or printed at home.'),
+  ).toBeTruthy()
 })
 
 it('uses the same factual description for SEO and Open Graph', () => {
