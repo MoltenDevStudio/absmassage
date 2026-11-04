@@ -9,15 +9,31 @@ import {
   waitFor,
 } from '@testing-library/react'
 import { renderToString } from 'react-dom/server'
-import CookieConsent from './CookieConsent'
-import BookNowButton from './BookNowButton'
-import BookingEmbedded from './BookingEmbedded'
-import Footer from './Nav/Footer'
 import { CONSENT_COOKIE, CONSENT_STORAGE_KEY } from '../lib/optionalTracking'
 
 vi.mock('next/navigation', () => ({ usePathname: () => '/' }))
 
-beforeEach(() => {
+let CookieConsent: typeof import('./CookieConsent').default
+let BookNowButton: typeof import('./BookNowButton').default
+let BookingEmbedded: typeof import('./BookingEmbedded').default
+let Footer: typeof import('./Nav/Footer').default
+
+beforeEach(async () => {
+  // Each test simulates a fresh document. Remounts within a test must retain
+  // the lifecycle, while independent visits need fresh module state as well
+  // as fresh scripts, storage, and tracking globals.
+  vi.resetModules()
+  ;[
+    { default: CookieConsent },
+    { default: BookNowButton },
+    { default: BookingEmbedded },
+    { default: Footer },
+  ] = await Promise.all([
+    import('./CookieConsent'),
+    import('./BookNowButton'),
+    import('./BookingEmbedded'),
+    import('./Nav/Footer'),
+  ])
   Element.prototype.scrollIntoView = vi.fn()
   vi.stubGlobal('BroadcastChannel', undefined)
   document.cookie = `${CONSENT_COOKIE}=; Max-Age=0; Path=/`
@@ -163,7 +179,7 @@ it('includes no optional script or tracking image in HTML when JavaScript is dis
   )
 })
 
-it('gates booking attribution and booking conversion events on the same choice', () => {
+it('gates booking attribution and booking conversion events on the same choice', async () => {
   sessionStorage.setItem('gclid', 'saved-ad-click')
   render(
     <React.StrictMode>
@@ -174,6 +190,7 @@ it('gates booking attribution and booking conversion events on the same choice',
       </CookieConsent>
     </React.StrictMode>,
   )
+  await screen.findByRole('region', { name: 'Cookie settings' })
   const link = screen.getAllByRole('link', {
     name: 'Book Now',
   })[0] as HTMLAnchorElement

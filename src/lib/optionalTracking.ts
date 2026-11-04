@@ -293,17 +293,28 @@ function clearTrackingCookies(browser: Window) {
   }
 }
 
-export class OptionalTrackingController {
+type ConsentListener = (
+  choice: ConsentChoice,
+  enabled: boolean,
+  requiresConsent: boolean,
+) => void
+
+// Scripts, their load callbacks, and consent reconciliation live as long as the
+// document. React controllers only subscribe; unmounting cannot reset tracking.
+const trackingLifecycles = new WeakMap<Document, TrackingLifecycle>()
+
+class TrackingLifecycle {
+  private listeners = new Set<ConsentListener>()
   private choice: ConsentChoice = null
   private enabled: boolean | undefined
-  private regionRequested = false
   private regionResolved = false
   private region = regionForCountry(null)
   private requiresConsent: boolean | undefined
-  private running = false
+  private started = false
   private pathname = ''
   private channel: BroadcastChannel | null = null
-  private googleStarted = false
+  private googleStatus: 'idle' | 'loading' | 'loaded' = 'idle'
+  private googleInitialized = false
   private reloadRequested = false
   private googleReady = false
   private pendingBookingCompleted = false
@@ -315,22 +326,26 @@ export class OptionalTrackingController {
 
   constructor(
     private browser: Window & typeof globalThis,
-    private onChoice: (
-      choice: ConsentChoice,
-      enabled: boolean,
-      requiresConsent: boolean,
-    ) => void,
-    private reload: () => void = () => browser.location.reload(),
-    private detectRegion: (
-      browser: Window,
-    ) => Promise<RegionInfo> = detectVisitorRegion,
-  ) {
-    // A new controller/document must resolve its own regional default.
-    visitorRegions.delete(browser)
+    private reload: () => void,
+    private detectRegion: (browser: Window) => Promise<RegionInfo>,
+  ) {}
+
+  subscribe(listener: ConsentListener) {
+    this.start()
+    this.synchronize()
+    this.listeners.add(listener)
+    listener(this.choice, this.enabled === true, this.requiresConsent === true)
+    return () => this.listeners.delete(listener)
   }
 
-  start() {
-    this.running = true
+  private onChoice: ConsentListener = (choice, enabled, requiresConsent) => {
+    for (const listener of this.listeners)
+      listener(choice, enabled, requiresConsent)
+  }
+
+  private start() {
+    if (this.started) return
+    this.started = true
     this.pathname = this.browser.location.pathname
     try {
       if (this.browser.BroadcastChannel) {
@@ -345,12 +360,9 @@ export class OptionalTrackingController {
     this.browser.addEventListener('pageshow', this.synchronize)
     this.browser.document.addEventListener('visibilitychange', this.synchronize)
     this.synchronize()
-    if (!this.regionRequested) {
-      this.regionRequested = true
-      void this.detectRegion(this.browser)
-        .then(this.resolveRegion)
-        .catch(() => this.resolveRegion(regionForCountry(null)))
-    }
+    void this.detectRegion(this.browser)
+      .then(this.resolveRegion)
+      .catch(() => this.resolveRegion(regionForCountry(null)))
   }
 
   private resolveRegion = (region: RegionInfo) => {
@@ -360,18 +372,8 @@ export class OptionalTrackingController {
     this.synchronize()
   }
 
-  stop() {
-    this.running = false
-    this.channel?.close()
-    this.channel = null
-    this.browser.removeEventListener('storage', this.onStorage)
-    this.browser.removeEventListener('focus', this.synchronize)
-    this.browser.removeEventListener('pageshow', this.synchronize)
-    this.browser.document.removeEventListener(
-      'visibilitychange',
-      this.synchronize,
-    )
-  }
+  // Keep document listeners and loaders alive even with no React subscribers:
+  // cross-tab withdrawal must still revoke any scripts left in this document.
 
   choose(choice: Exclude<ConsentChoice, null>) {
     const record: ConsentRecord = {
@@ -478,12 +480,16 @@ export class OptionalTrackingController {
   }
 
   private synchronize = () => {
-    if (!this.running) return
+    if (!this.started) return
     this.apply(effectiveConsent(this.browser).choice)
     // Replacing the document discards volatileDecisions. Only do so after
     // verifying a durable rejection, or stale acceptance could revive tracking.
     // Recheck even if apply did not change state, so a successful retry reloads.
-    if (this.googleStarted && !this.enabled && !this.reloadRequested) {
+    if (
+      (this.googleStatus !== 'idle' || this.metaScript !== null) &&
+      !this.enabled &&
+      !this.reloadRequested
+    ) {
       const saved = readConsent(this.browser)
       if (saved.reliable && saved.choice === 'rejected') {
         this.reloadRequested = true
@@ -494,7 +500,7 @@ export class OptionalTrackingController {
 
   private allowed() {
     return (
-      this.running &&
+      this.started &&
       this.enabled === true &&
       hasOptionalTrackingConsent(this.browser)
     )
@@ -533,7 +539,7 @@ export class OptionalTrackingController {
         }
         this.cleanGclidUrl()
       }
-      if (this.googleStarted) {
+      if (this.googleStatus !== 'idle') {
         this.googleConsent('update', 'denied')
         // Loaded tags may still send cookieless pings. synchronize reloads to
         // remove them only when a saved rejection makes replacement safe.
@@ -561,8 +567,12 @@ export class OptionalTrackingController {
   }
 
   private loadGoogle() {
-    if (this.googleStarted || !this.allowed()) return
-    this.googleStarted = true
+    if (!this.allowed()) return
+    if (this.googleStatus !== 'idle') {
+      this.grantGoogle()
+      return
+    }
+    this.googleStatus = 'loading'
     // Keep GTM denied while its code is downloading. If consent is withdrawn
     // before load, it must not process its initial event under a stale grant.
     this.googleConsent('default', 'denied')
@@ -572,25 +582,36 @@ export class OptionalTrackingController {
     script.addEventListener(
       'load',
       () => {
+        this.googleStatus = 'loaded'
         this.synchronize()
         if (!this.allowed()) {
           this.googleConsent('update', 'denied')
           return
         }
-        this.googleConsent('update', 'granted')
-        this.browser.dataLayer!.push({
-          'gtm.start': Date.now(),
-          event: 'gtm.js',
-        })
-        this.googleReady = true
-        if (this.pendingBookingCompleted) {
-          this.pendingBookingCompleted = false
-          this.pushBookingCompleted()
-        }
+        this.grantGoogle()
       },
       { once: true },
     )
     this.browser.document.head.appendChild(script)
+  }
+
+  private grantGoogle() {
+    if (this.googleStatus !== 'loaded' || !this.allowed()) return
+    if (!this.googleReady) {
+      this.googleConsent('update', 'granted')
+      this.googleReady = true
+    }
+    if (!this.googleInitialized) {
+      this.browser.dataLayer!.push({
+        'gtm.start': Date.now(),
+        event: 'gtm.js',
+      })
+      this.googleInitialized = true
+    }
+    if (this.pendingBookingCompleted) {
+      this.pendingBookingCompleted = false
+      this.pushBookingCompleted()
+    }
   }
 
   private pushBookingCompleted() {
@@ -672,5 +693,47 @@ export class OptionalTrackingController {
       '',
       url.toString(),
     )
+  }
+}
+
+export class OptionalTrackingController {
+  private lifecycle: TrackingLifecycle
+  private unsubscribe: (() => void) | null = null
+
+  constructor(
+    browser: Window & typeof globalThis,
+    private onChoice: ConsentListener,
+    reload: () => void = () => browser.location.reload(),
+    detectRegion: (
+      browser: Window,
+    ) => Promise<RegionInfo> = detectVisitorRegion,
+  ) {
+    let lifecycle = trackingLifecycles.get(browser.document)
+    if (!lifecycle) {
+      lifecycle = new TrackingLifecycle(browser, reload, detectRegion)
+      trackingLifecycles.set(browser.document, lifecycle)
+    }
+    this.lifecycle = lifecycle
+  }
+
+  start() {
+    this.unsubscribe ??= this.lifecycle.subscribe(this.onChoice)
+  }
+
+  stop() {
+    this.unsubscribe?.()
+    this.unsubscribe = null
+  }
+
+  choose(choice: Exclude<ConsentChoice, null>) {
+    return this.lifecycle.choose(choice)
+  }
+
+  navigate(pathname: string) {
+    if (this.unsubscribe) this.lifecycle.navigate(pathname)
+  }
+
+  trackBookingCompleted() {
+    if (this.unsubscribe) this.lifecycle.trackBookingCompleted()
   }
 }

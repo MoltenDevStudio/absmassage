@@ -106,6 +106,42 @@ function bookingEvents(fixture: ReturnType<typeof tab>) {
   )
 }
 
+function finishGoogle(fixture: Fixture) {
+  fixture.browser.document
+    .querySelector('script[src*="gtm.js"]')!
+    .dispatchEvent(new fixture.dom.window.Event('load'))
+}
+
+function remount(fixture: Fixture) {
+  fixture.controller.stop()
+  fixture.controller = new OptionalTrackingController(
+    fixture.browser,
+    fixture.changed,
+    fixture.reload,
+    async () => regionForCountry(null),
+  )
+  fixture.controller.start()
+}
+
+function expectGoogleConsent(fixture: Fixture, value: 'granted' | 'denied') {
+  expect(googleCalls(fixture).at(-1)).toEqual([
+    'consent',
+    'update',
+    {
+      analytics_storage: value,
+      ad_storage: value,
+      ad_user_data: value,
+      ad_personalization: value,
+    },
+  ])
+}
+
+function gtmStarts(fixture: Fixture) {
+  return (fixture.browser.dataLayer || []).filter(
+    (entry) => !('length' in entry) && entry.event === 'gtm.js',
+  )
+}
+
 function blockPersistence(
   fixture: Fixture,
   local: 'getter' | 'read' | 'write' | 'silent',
@@ -989,6 +1025,262 @@ describe('unavailable consent persistence', () => {
     expect(hasOptionalTrackingConsent(fixture.browser)).toBe(false)
     expect(fixture.changed).toHaveBeenLastCalledWith('rejected', false, false)
   })
+})
+
+describe('document tracking lifecycle', () => {
+  it('repeatedly restores Google and Meta in the same controller without replaying conversions or initialization', () => {
+    const fixture = tab()
+    fixture.controller.start()
+    fixture.controller.choose('accepted')
+    finishGoogle(fixture)
+    const pixel = finishMeta(fixture)
+    blockPersistence(fixture, 'write')
+    for (let index = 0; index < 3; index++) {
+      expect(fixture.controller.choose('rejected')).toBe(false)
+      fixture.controller.choose('rejected')
+      expectGoogleConsent(fixture, 'denied')
+      fixture.controller.trackBookingCompleted()
+      expect(bookingEvents(fixture)).toHaveLength(index)
+      fixture.controller.choose('accepted')
+      fixture.controller.choose('accepted')
+      expectGoogleConsent(fixture, 'granted')
+      fixture.controller.trackBookingCompleted()
+      expect(bookingEvents(fixture)).toHaveLength(index + 1)
+    }
+    expect(gtmStarts(fixture)).toHaveLength(1)
+    expect(scripts(fixture)).toHaveLength(2)
+    expect(pixel.mock.calls.filter((call) => call[0] === 'init')).toHaveLength(
+      1,
+    )
+    expect(pixel.mock.calls.filter((call) => call[0] === 'track')).toHaveLength(
+      4,
+    )
+    expect(fixture.reload).not.toHaveBeenCalled()
+  })
+
+  it('shares the regional lookup and tracks withdrawal with no mounted subscriber', async () => {
+    const detect = vi.fn(async () => regionForCountry('NZ'))
+    const fixture = tab(undefined, undefined, detect)
+    fixture.controller.start()
+    await vi.waitFor(() => expect(scripts(fixture)).toHaveLength(2))
+    finishGoogle(fixture)
+    const pixel = finishMeta(fixture)
+    const changed = vi.fn()
+    const second = new OptionalTrackingController(fixture.browser, changed)
+    second.start()
+    expect(detect).toHaveBeenCalledOnce()
+    expect(changed).toHaveBeenLastCalledWith(null, true, false)
+    expect(channels.size).toBe(1)
+    fixture.controller.stop()
+    fixture.changed.mockClear()
+    second.choose('accepted')
+    expect(fixture.changed).not.toHaveBeenCalled()
+    expect(changed).toHaveBeenLastCalledWith('accepted', true, false)
+    second.stop()
+
+    const other = tab()
+    other.controller.start()
+    other.controller.choose('accepted')
+    blockPersistence(other, 'write')
+    other.controller.choose('rejected')
+    expectGoogleConsent(fixture, 'denied')
+    expect(pixel).toHaveBeenLastCalledWith('consent', 'revoke')
+    expect(fixture.reload).not.toHaveBeenCalled()
+    remount(fixture)
+    expect(fixture.changed).toHaveBeenLastCalledWith('rejected', false, false)
+    expect(detect).toHaveBeenCalledOnce()
+    expect(fixture.controller.choose('rejected')).toBe(true)
+    expect(fixture.reload).toHaveBeenCalledOnce()
+    expect(scripts(fixture)).toHaveLength(2)
+  })
+
+  it.each(['loaded', 'loading', 'loaded while rejected'])(
+    'restores consent and booking conversions after a failed withdrawal when GTM is %s',
+    (timing) => {
+      const fixture = tab()
+      fixture.controller.start()
+      fixture.controller.choose('accepted')
+      const storage = fixture.browser.localStorage
+      const pixel = finishMeta(fixture)
+      if (timing === 'loaded') finishGoogle(fixture)
+      fixture.controller.trackBookingCompleted()
+      const before = bookingEvents(fixture).length
+      blockPersistence(fixture, 'write')
+      expect(fixture.controller.choose('rejected')).toBe(false)
+      expectGoogleConsent(fixture, 'denied')
+      fixture.controller.trackBookingCompleted()
+      if (timing === 'loaded while rejected') finishGoogle(fixture)
+      expect(bookingEvents(fixture)).toHaveLength(before)
+      expect(fixture.reload).not.toHaveBeenCalled()
+
+      remount(fixture)
+      Object.defineProperty(fixture.browser, 'localStorage', { value: storage })
+      expect(fixture.controller.choose('accepted')).toBe(true)
+      fixture.controller.trackBookingCompleted()
+      if (timing === 'loading') {
+        expectGoogleConsent(fixture, 'denied')
+        expect(bookingEvents(fixture)).toHaveLength(before)
+        finishGoogle(fixture)
+      }
+      expectGoogleConsent(fixture, 'granted')
+      expect(bookingEvents(fixture)).toHaveLength(before + 1)
+      fixture.controller.trackBookingCompleted()
+      expect(bookingEvents(fixture)).toHaveLength(before + 2)
+      expect(gtmStarts(fixture)).toHaveLength(1)
+      expect(scripts(fixture)).toHaveLength(2)
+      expect(
+        pixel.mock.calls.filter((call) => call[0] === 'init'),
+      ).toHaveLength(1)
+      expect(
+        pixel.mock.calls.filter((call) => call[0] === 'track'),
+      ).toHaveLength(2)
+      expect(fixture.reload).not.toHaveBeenCalled()
+    },
+  )
+
+  it.each([false, true])(
+    'safely reloads a saved rejection retry across remounts (scripts loaded: %s)',
+    (loaded) => {
+      const fixture = tab()
+      fixture.controller.start()
+      fixture.controller.choose('accepted')
+      const storage = fixture.browser.localStorage
+      if (loaded) {
+        finishGoogle(fixture)
+        finishMeta(fixture)
+      }
+      blockPersistence(fixture, 'write')
+      expect(fixture.controller.choose('rejected')).toBe(false)
+      remount(fixture)
+      fixture.controller.navigate('/contact')
+      expect(fixture.controller.choose('rejected')).toBe(false)
+      expectGoogleConsent(fixture, 'denied')
+      expect(fixture.reload).not.toHaveBeenCalled()
+
+      Object.defineProperty(fixture.browser, 'localStorage', { value: storage })
+      expect(fixture.controller.choose('rejected')).toBe(true)
+      expect(fixture.reload).toHaveBeenCalledOnce()
+      remount(fixture)
+      fixture.controller.choose('rejected')
+      fixture.controller.navigate('/services')
+      fixture.controller.trackBookingCompleted()
+      if (!loaded) {
+        finishGoogle(fixture)
+        finishMeta(fixture)
+      }
+      expect(fixture.reload).toHaveBeenCalledOnce()
+      expectGoogleConsent(fixture, 'denied')
+      expect(bookingEvents(fixture)).toHaveLength(0)
+      expect(scripts(fixture)).toHaveLength(2)
+      const next = tab()
+      next.browser.localStorage.setItem(
+        CONSENT_STORAGE_KEY,
+        storage.getItem(CONSENT_STORAGE_KEY)!,
+      )
+      next.controller.start()
+      expect(scripts(next)).toHaveLength(0)
+      expect(hasOptionalTrackingConsent(next.browser)).toBe(false)
+    },
+  )
+
+  it.each(['before', 'between', 'after'])(
+    'retains one initialization and pending conversion when scripts load %s remounts',
+    (timing) => {
+      const fixture = tab()
+      fixture.controller.start()
+      fixture.controller.choose('accepted')
+      fixture.controller.trackBookingCompleted()
+      let pixel!: ReturnType<typeof vi.fn>
+      if (timing === 'before') {
+        finishGoogle(fixture)
+        pixel = finishMeta(fixture)
+      }
+      fixture.controller.stop()
+      if (timing === 'between') {
+        finishGoogle(fixture)
+        pixel = finishMeta(fixture)
+      }
+      remount(fixture)
+      if (timing === 'after') {
+        finishGoogle(fixture)
+        pixel = finishMeta(fixture)
+      }
+      const commands = googleCalls(fixture).length
+      for (let index = 0; index < 3; index++) {
+        remount(fixture)
+        fixture.controller.start()
+        fixture.controller.choose('accepted')
+        fixture.controller.navigate('/')
+      }
+      expect(googleCalls(fixture)).toHaveLength(commands)
+      expectGoogleConsent(fixture, 'granted')
+      expect(bookingEvents(fixture)).toHaveLength(1)
+      expect(gtmStarts(fixture)).toHaveLength(1)
+      expect(scripts(fixture)).toHaveLength(2)
+      expect(
+        pixel.mock.calls.filter((call) => call[0] === 'init'),
+      ).toHaveLength(1)
+      expect(
+        pixel.mock.calls.filter((call) => call[0] === 'track'),
+      ).toHaveLength(1)
+      fixture.controller.navigate('/about')
+      remount(fixture)
+      fixture.controller.navigate('/about')
+      fixture.controller.navigate('/')
+      expect(
+        pixel.mock.calls.filter((call) => call[0] === 'track'),
+      ).toHaveLength(3)
+      fixture.controller.trackBookingCompleted()
+      expect(bookingEvents(fixture)).toHaveLength(2)
+    },
+  )
+
+  it.each(['broadcast', 'storage'])(
+    'restores existing integrations after cross-tab withdrawal via %s and a deliberate preference change',
+    (transport) => {
+      const fixture = tab()
+      fixture.controller.start()
+      fixture.controller.choose('accepted')
+      finishGoogle(fixture)
+      const pixel = finishMeta(fixture)
+      const storage = fixture.browser.localStorage
+      if (transport === 'broadcast') {
+        // A failed save in another tab must override this tab's stale acceptance.
+        const other = tab()
+        other.controller.start()
+        other.controller.choose('accepted')
+        blockPersistence(other, 'write')
+        expect(other.controller.choose('rejected')).toBe(false)
+        expect(fixture.reload).not.toHaveBeenCalled()
+      } else {
+        storage.setItem(CONSENT_STORAGE_KEY, 'rejected')
+        fixture.browser.dispatchEvent(
+          new fixture.dom.window.StorageEvent('storage', {
+            key: CONSENT_STORAGE_KEY,
+            newValue: 'rejected',
+          }),
+        )
+        expect(fixture.reload).toHaveBeenCalledOnce()
+      }
+      expectGoogleConsent(fixture, 'denied')
+      expect(pixel).toHaveBeenLastCalledWith('consent', 'revoke')
+      remount(fixture)
+      fixture.controller.navigate('/services')
+      fixture.controller.trackBookingCompleted()
+      expect(bookingEvents(fixture)).toHaveLength(0)
+      expect(hasOptionalTrackingConsent(fixture.browser)).toBe(false)
+
+      fixture.controller.choose('accepted')
+      expectGoogleConsent(fixture, 'granted')
+      fixture.controller.trackBookingCompleted()
+      expect(bookingEvents(fixture)).toHaveLength(1)
+      expect(scripts(fixture)).toHaveLength(2)
+      expect(gtmStarts(fixture)).toHaveLength(1)
+      expect(
+        pixel.mock.calls.filter((call) => call[0] === 'init'),
+      ).toHaveLength(1)
+    },
+  )
 })
 
 describe('regional banner and consent records', () => {

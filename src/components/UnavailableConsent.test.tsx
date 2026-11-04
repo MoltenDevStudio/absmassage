@@ -55,13 +55,14 @@ it('withdraws all integrations and booking attribution when storage stops workin
     }),
   )
   window.history.replaceState(null, '', '/?gclid=ad-click')
-  render(
+  const page = (
     <CookieConsent>
       <BookNowButton className="booking" />
       <BookingEmbedded />
       <Footer />
-    </CookieConsent>,
+    </CookieConsent>
   )
+  const mounted = render(page)
   await screen.findByTestId('analytics')
   const event = { url: '/' }
   expect(integrations.analytics!(event)).toBe(event)
@@ -76,9 +77,11 @@ it('withdraws all integrations and booking attribution when storage stops workin
   window.fbq!.callMethod = pixel
   meta.dispatchEvent(new Event('load'))
   gtm.dispatchEvent(new Event('load'))
-  vi.spyOn(window, 'localStorage', 'get').mockImplementation(() => {
-    throw new Error('storage blocked')
-  })
+  const blockedStorage = vi
+    .spyOn(window, 'localStorage', 'get')
+    .mockImplementation(() => {
+      throw new Error('storage blocked')
+    })
   vi.spyOn(document, 'cookie', 'get').mockReturnValue('')
   vi.spyOn(document, 'cookie', 'set').mockImplementation(() => {})
   fireEvent.click(screen.getByRole('button', { name: 'Cookie settings' }))
@@ -109,4 +112,46 @@ it('withdraws all integrations and booking attribution when storage stops workin
   )
   expect(reloadError).not.toHaveBeenCalled()
   expect(screen.getByRole('status').textContent).toContain('could not be saved')
+
+  mounted.unmount()
+  render(page)
+  expect(hasOptionalTrackingConsent()).toBe(false)
+  blockedStorage.mockRestore()
+  fireEvent.click(screen.getByRole('button', { name: 'Cookie settings' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Accept all' }))
+  expect(hasOptionalTrackingConsent()).toBe(true)
+  expect(integrations.analytics!(event)).toBe(event)
+  expect(integrations.speed!(event)).toBe(event)
+  const googleCommands = window.dataLayer!.filter((entry) => 'length' in entry)
+  expect(Array.from(googleCommands.at(-1) as IArguments)).toEqual([
+    'consent',
+    'update',
+    {
+      analytics_storage: 'granted',
+      ad_storage: 'granted',
+      ad_user_data: 'granted',
+      ad_personalization: 'granted',
+    },
+  ])
+  window.dispatchEvent(
+    new MessageEvent('message', { data: 'cliniko-bookings-page:confirmed' }),
+  )
+  expect(
+    window.dataLayer!.filter(
+      (entry) =>
+        !('length' in entry) && entry.event === 'clinikoBookingCompleted',
+    ),
+  ).toHaveLength(1)
+  expect(
+    window.dataLayer!.filter(
+      (entry) => !('length' in entry) && entry.event === 'gtm.js',
+    ),
+  ).toHaveLength(1)
+  expect(document.querySelectorAll('script[src*="gtm.js"]')).toHaveLength(1)
+  expect(document.querySelectorAll('script[src*="fbevents.js"]')).toHaveLength(
+    1,
+  )
+  expect(pixel.mock.calls.filter((call) => call[0] === 'init')).toHaveLength(1)
+  expect(pixel.mock.calls.filter((call) => call[0] === 'track')).toHaveLength(2)
+  expect(reloadError).not.toHaveBeenCalled()
 })
