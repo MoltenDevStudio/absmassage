@@ -13,7 +13,7 @@ it('shows the requested introduction, checkout, description, and FAQs', () => {
     'Gift Vouchers',
   )
   const intro = screen.getByText(
-    'Buy a massage gift voucher below, then send it by email or print it at home.',
+    'Buy a massage gift voucher below to send by email or print at home.',
   )
   expect(intro.nextElementSibling?.getAttribute('aria-label')).toBe(
     'Buy a gift voucher',
