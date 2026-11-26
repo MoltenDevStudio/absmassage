@@ -29,8 +29,7 @@ export default function GiftVouchersPage() {
       </div>
       <div className="content-container gift-vouchers-page">
         <p className="center gift-vouchers-intro">
-          Buy a massage gift voucher below, then send it by email or print it at
-          home.
+          Buy a massage gift voucher below to send by email or print at home.
         </p>
         <GiftUpWidget />
         <section className="gift-vouchers-description">
